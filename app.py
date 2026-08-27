@@ -1,6 +1,7 @@
 # Import packages
 from dash import Dash, html, dcc, callback, Output, Input
 import dash_ag_grid as dag
+import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
 import sqlite3
@@ -9,8 +10,9 @@ import sqlite3
 #df = pd.read_csv('testdata.csv')
 df_historical = pd.read_sql("SELECT * from test_data WHERE \"Payment Date\" < date('2023-07-17')", sqlite3.connect('pat_test.db'))
 df_preference = pd.read_sql("SELECT * from test_data WHERE \"Payment Date\" >= date('2023-07-17') AND \"Payment Date\" <= date('2023-10-15')", sqlite3.connect('pat_test.db'))
+
 # Initialize the app
-app = Dash()
+app = Dash(external_stylesheets=[dbc.themes.BOOTSTRAP] )
 app.title  = "Preference Analysis Tool"
 
 # Get historical range data
