@@ -72,7 +72,8 @@ app.layout = [
      html.Div(id="pref-average_dso"),
      html.Div(id="pref-average_dpd"),
      html.Div(id="pref-weighted_dso"),
-     html.Div(id="pref-weighted_dpd")
+     html.Div(id="pref-weighted_dpd"),
+     html.Div(id="diff-wavg", style={"font-weight": "bold"})
 ]
 
 # Here is where we update our statisticakl analysis for the historical period
@@ -103,6 +104,7 @@ def update_hist_totals(rowData):
     Output("pref-average_dpd", "children"),
     Output("pref-weighted_dso", "children"),
     Output("pref-weighted_dpd", "children"),
+    Output("diff-wavg", "children"),
     Input("preference", "rowData")
 )
 
@@ -113,7 +115,15 @@ def update_pref_totals(rowData):
     average_dpd = df["Days Past Due"].mean()
     weighted_dso = df["Invoice to Payment"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
     weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
-    return f"Preference Period Total Transfer Amount: ${total:,.2f}", f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}"
+    diff = compare_hist_pref()
+    return f"Preference Period Total Transfer Amount: ${total:,.2f}", f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}", f"Weighted DSO Difference (Historical vs Preference): {diff:.2f}%"
+
+def compare_hist_pref():
+    hist_weighted_dso = df_historical["Invoice to Payment"].mul(df_historical["Transfer Amount"]).sum() / df_historical["Transfer Amount"].sum()
+    pref_weighted_dso = df_preference["Invoice to Payment"].mul(df_preference["Transfer Amount"]).sum() / df_preference["Transfer Amount"].sum()
+    diff = (pref_weighted_dso - hist_weighted_dso) / hist_weighted_dso * 100
+    return(diff) 
+
 
 # Run the app
 if __name__ == '__main__':
