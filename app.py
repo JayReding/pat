@@ -51,6 +51,7 @@ app.layout = [
     html.Div(id="hist-average_dpd"),
     html.Div(id="hist-weighted_dso"),
     html.Div(id="hist-weighted_dpd"),
+    html.Div(id="hist-skew"),
 
     html.H3(children='Preference Period: 07/17/2023 through 10/15/2023'),
      dag.AgGrid(
@@ -84,6 +85,7 @@ app.layout = [
     Output("hist-average_dpd", "children"),
     Output("hist-weighted_dso", "children"),
     Output("hist-weighted_dpd", "children"),
+    Output("hist-skew", "children"),
     Input("historical", "rowData")
 )
 
@@ -94,7 +96,13 @@ def update_hist_totals(rowData):
     average_dpd = df["Days Past Due"].mean()
     weighted_dso = df["Invoice to Payment"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
     weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
-    return f"Historical Period Total Transfer Amount: ${total:,.2f}", f"Historical Period Average DSO: {average_dso:.2f}", f"Historical Period Average DPD: {average_dpd:.2f}", f"Historical Period Weighted DSO: {weighted_dso:.2f}", f"Historical Period Weighted DPD: {weighted_dpd:.2f}"
+    skew = df["Invoice to Payment"].skew()
+    if skew > 1 or skew < -1:
+        skew_warning = " (Warning: Skew is outside the range of -1 to 1, indicating a non-normal distribution)"
+    else:
+        skew_warning = ""
+
+    return f"Historical Period Total Transfer Amount: ${total:,.2f}", f"Historical Period Average DSO: {average_dso:.2f}", f"Historical Period Average DPD: {average_dpd:.2f}", f"Historical Period Weighted DSO: {weighted_dso:.2f}", f"Historical Period Weighted DPD: {weighted_dpd:.2f}", f"Historical Period Skew: {skew:.2f}, {skew_warning}"
 
 
 # Here is where we update our statistical analysis for the preference period
