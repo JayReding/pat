@@ -79,6 +79,12 @@ app.layout = html.Div([
                       html.Div(id="pref-weighted_dso"),
                       html.Div(id="pref-weighted_dpd"),
                       html.Div(id="diff-wavg", style={"font-weight": "bold"})
+        ]),
+        
+        dcc.Tab(label='New Value', children=[
+            html.H3(children='New Value Tab'),
+            html.P(children='This is the content for the New Value tab.')
+
         ])
      ])
 ])
