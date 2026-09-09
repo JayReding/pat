@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "openai/gemma4:26b",
+  "small_model": "openai/granite4:latest",
+  "provider": {
+    "openai": {
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "apiKey": "ollama"
+      }
+    }
+  }
+}

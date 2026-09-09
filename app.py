@@ -1,5 +1,5 @@
 # Import packages
-from dash import Dash, html, dcc, callback, Output, Input
+from dash import Dash, html, dcc, callback, Output, Input, State
 import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -57,17 +57,13 @@ def calculate_new_value(df: pd.DataFrame) -> pdDataFrame:
 
     df = trim_leading_nulls(df, "Transfer Amount")  # Remove leading nulls in 'Transfer Amount'
 
+    #df["Allowed New Value"] = np.where(df["Unpaid"] > 0, df["Invoice Amount"], np.nan)  # Set defaults for allowed new value based on invoice amount
+    df["Allowed New Value"] = df["Invoice Amount"]  # Set defaults for allowed new value based on invoice amount
+
     # We need to create a cumulative sum by adding the transfers and subtracting any subsequent new value
     df["Net Change"] = df["Transfer Amount"].fillna(0) - df["Invoice Amount"].fillna(0)
 
     df["Net Preference"] = df["Net Change"].cumsum().clip(lower=0) # Ensure that the net preference does not go below zero
-    
-
-    #nitial_snv = df["Net Change"].clip(lower=0)  # Ensure that the net preference does not go below zero
-
-    # The net preference cannot go below zero, so we use np.maximum to ensure that any negative values are set to zero
-    # df["Net Preference"] = df["Net Change 1"] - df["Net Change 2"]
-
 
     df = df.drop(columns=["Net Change"])  # Drop the intermediate column
 
@@ -97,6 +93,17 @@ date_obj = "d3.timeParse('%Y-%m-%d %H:%M:%S')(params.data.date)"
 app.layout = html.Div(style={"padding": "20px"}, children=[
     html.H1(children='Preference Analysis Tool'),
      dcc.Tabs([
+         dcc.Tab(id="summary", label='Case Summary', children=[
+            html.H3(children='Case Summary'),
+            dbc.ListGroup([
+                dbc.ListGroupItem([html.Strong('Total Transfers: '), html.Span(id="summary-total-transfers")]),
+                dbc.ListGroupItem([html.Strong('Total New Value: '), html.Span(id="summary-total-new-value")]),
+                dbc.ListGroupItem([html.Strong('Net of New Value: '), html.Span(id="summary-net-new-value")]),
+                dbc.ListGroupItem([html.Strong('Historical Weighted Average DSO: '), html.Span(id="summary-hist-wavg")]),
+                dbc.ListGroupItem([html.Strong('Preference Period Weighted DSO: '), html.Span(id="summary-pref-wavg")]),
+                dbc.ListGroupItem([html.Strong('Weighted DSO Difference: '), html.Span(id="summary-dso-diff")]),
+            ]),
+        ]),
          dcc.Tab(label='Historical Period', children=[
             html.H3(children=f'Historical Period: {history_start.strftime("%m/%d/%Y")} through {history_end.strftime("%m/%d/%Y")}'),
             dag.AgGrid(
@@ -150,7 +157,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             html.H3(children='New Value Tab'),
             html.P(children='This is the content for the New Value tab.'),
             dag.AgGrid(
-                id="transfers",
+                id="new_value",
                 rowData=df_snv.to_dict('records'),
                 columnDefs=[
                     {"field": "Transaction Date"},
@@ -159,13 +166,73 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                     {"field": "Invoice Number"},
                     {"field": "Invoice Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
                     {"field": "Invoice Date"},
-                    {"field": "Net Preference", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}}\
+                    {"field": "Allowed New Value", "valueFormatter":{"function": "params.value ? d3.format('$,.2f')(params.value) : null"}},
+                    {"field": "Net Preference", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
+                    {"headerName": "Exclude New Value", "field": "Remove", "editable": {"function": "params.data['Invoice Amount'] != null"}, "cellEditor": "agCheckboxCellEditor", "cellEditorParams": {"values": [True, False]}, "valueSetter": {"function": "params.data['Remove'] = params.newValue; return true;"}}
                 ]
-            )
+            ),
+            html.Div(id="nv-net-preference-total"),
+        ]),
+         dcc.Tab(id="ocb", label='Ordinary Course', children=[
+            html.H3(children='Ordinary Course'),
+            html.P(children='This is the content for the Ordinary Course tab.'),
         ])
      ])
 
 ])
+
+@callback(
+    Output("new_value", "rowData"),
+    Input("new_value", "cellValueChanged"),
+    State("new_value", "rowData")
+)
+def update_new_value(cellChange, rowData):
+    df = pd.DataFrame(rowData)
+
+    if "Remove" not in df.columns:
+        df["Remove"] = False
+
+    df["Allowed New Value"] = df.apply(
+        lambda row: 0 if row.get("Remove") else (
+            row["Invoice Amount"] if pd.notna(row.get("Invoice Amount")) else 0
+        ),
+        axis=1
+    )
+
+    df["Net Preference"] = (
+        df["Transfer Amount"].fillna(0) - df["Allowed New Value"].fillna(0)
+    ).cumsum().clip(lower=0)
+
+    return df.to_dict("records")
+
+@callback(
+    Output("nv-net-preference-total", "children"),
+    Input("new_value", "rowData")
+)
+def update_nv_totals(rowData):
+    df = pd.DataFrame(rowData)
+    total = df["Net Preference"].iloc[-1]
+    return f"Net Preference Total: ${total:,.2f}"
+
+@callback(
+    Output("summary-total-transfers", "children"),
+    Output("summary-total-new-value", "children"),
+    Output("summary-net-new-value", "children"),
+    Output("summary-hist-wavg", "children"),
+    Output("summary-pref-wavg", "children"),
+    Output("summary-dso-diff", "children"),
+    Input("new_value", "rowData")
+)
+def update_summary(nv_rowData):
+    df_nv = pd.DataFrame(nv_rowData)
+    total_transfers = df_transfers["Transfer Amount"].sum()
+    total_new_value = df_nv["Allowed New Value"].sum()
+    net_new_value = df_nv["Net Preference"].iloc[-1]
+    hist_wavg = calc_weighted_dso(df_historical)
+    pref_wavg = calc_weighted_dso(df_preference)
+    diff = (pref_wavg - hist_wavg) / hist_wavg * 100
+    return (f"${total_transfers:,.2f}", f"${total_new_value:,.2f}", f"${net_new_value:,.2f}",
+            f"{hist_wavg:.2f}", f"{pref_wavg:.2f}", f"{diff:.2f}%")
  
 @callback(
     Output("hist-total-output", "children"),
@@ -182,7 +249,7 @@ def update_hist_totals(rowData):
     total = df["Transfer Amount"].sum()
     average_dso = df["Invoice to Payment"].mean()
     average_dpd = df["Days Past Due"].mean()
-    weighted_dso = df["Invoice to Payment"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
+    weighted_dso = calc_weighted_dso(df)
     weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
     skew = df["Invoice to Payment"].skew()
     if skew > 1 or skew < -1:
@@ -207,14 +274,17 @@ def update_pref_totals(rowData):
     total = df["Transfer Amount"].sum()
     average_dso = df["Invoice to Payment"].mean()
     average_dpd = df["Days Past Due"].mean()
-    weighted_dso = df["Invoice to Payment"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
+    weighted_dso = calc_weighted_dso(df)
     weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
     diff = compare_hist_pref()
     return f"Preference Period Total Transfer Amount: ${total:,.2f}", f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}", f"Weighted DSO Difference (Historical vs Preference): {diff:.2f}%"
 
+def calc_weighted_dso(df):
+    return df["Invoice to Payment"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
+
 def compare_hist_pref():
-    hist_weighted_dso = df_historical["Invoice to Payment"].mul(df_historical["Transfer Amount"]).sum() / df_historical["Transfer Amount"].sum()
-    pref_weighted_dso = df_preference["Invoice to Payment"].mul(df_preference["Transfer Amount"]).sum() / df_preference["Transfer Amount"].sum()
+    hist_weighted_dso = calc_weighted_dso(df_historical)
+    pref_weighted_dso = calc_weighted_dso(df_preference)
     diff = (pref_weighted_dso - hist_weighted_dso) / hist_weighted_dso * 100
     return(diff) 
 
