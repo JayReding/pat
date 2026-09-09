@@ -71,6 +71,38 @@ def calculate_new_value(df: pd.DataFrame) -> pdDataFrame:
 
 df_snv = calculate_new_value(pd.concat([df_transfers, df_newvalue], ignore_index=True))
 
+def build_ocb_data(start=0, end=100, step=5):
+    nrows = max(1, (end - start) // step)
+    edges = [start] + [start + k*step + 1 for k in range(1, nrows)] + [end + 1]
+    labels = [f"< {start}"] + [f"{edges[i]}-{edges[i+1]-1}" for i in range(nrows)] + [f"> {end}"]
+    bins = [float("-inf")] + edges + [float("inf")]
+    p = df_preference.copy()
+    h = df_historical.copy()
+    p["bin"] = pd.cut(p["Invoice to Payment"], bins=bins, labels=labels, right=False, include_lowest=True)
+    h["bin"] = pd.cut(h["Invoice to Payment"], bins=bins, labels=labels, right=False, include_lowest=True)
+    rows = []
+    for lab in labels:
+        pi = p.index[p["bin"] == lab]
+        hi = h.index[h["bin"] == lab]
+        pc, hc = len(pi), len(hi)
+        p_pct = pc / len(p) * 100
+        h_pct = hc / len(h) * 100
+        pct_diff = (p_pct - h_pct) / h_pct * 100 if h_pct != 0 else 0.0
+        rows.append({
+            "date_range": lab,
+            "pref_pct": p_pct,
+            "hist_pct": h_pct,
+            "pct_diff": pct_diff,
+            "pref_count": pc,
+            "hist_count": hc,
+            "pref_amount": p.loc[pi, "Invoice Amount"].sum(),
+            "hist_amount": h.loc[hi, "Invoice Amount"].sum(),
+        })
+    return pd.DataFrame(rows)
+
+
+df_ocb = build_ocb_data()
+
 
 
 # Initialize the app
@@ -175,7 +207,42 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
         ]),
          dcc.Tab(id="ocb", label='Ordinary Course', children=[
             html.H3(children='Ordinary Course'),
-            html.P(children='This is the content for the Ordinary Course tab.'),
+            dbc.Row([
+                dbc.Col([
+                    html.Label('Start Range', htmlFor="ocb-start"),
+                    dcc.Dropdown(id="ocb-start", options=[{"label": str(i), "value": i} for i in range(-5, 21)], value=0, clearable=False, searchable=False),
+                ], width=4),
+                dbc.Col([
+                    html.Label('End Range', htmlFor="ocb-end"),
+                    dcc.Dropdown(id="ocb-end", options=[{"label": str(i), "value": i} for i in range(100, 301)], value=100, clearable=False, searchable=False),
+                ], width=4),
+                dbc.Col([
+                    html.Label('Step Size', htmlFor="ocb-step"),
+                    dbc.Select(id="ocb-step", options=[{"label": str(i), "value": i} for i in range(1, 11)], value=5),
+                ], width=4),
+            ]),
+            dag.AgGrid(
+                id="ocb_grid",
+                rowData=df_ocb.to_dict('records'),
+                columnDefs=[
+                    {"field": "date_range", "headerName": "Date Range"},
+                    {"field": "pref_pct", "headerName": "Preference % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
+                    {"field": "hist_pct", "headerName": "Historical % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
+                    {"field": "pct_diff", "headerName": "Percentage Difference", "valueFormatter": {"function": "params.value != null ? d3.format('.2f')(params.value) + '%' : ''"}},
+                    {"field": "pref_count", "headerName": "Preference Invoice Count"},
+                    {"field": "hist_count", "headerName": "Historical Invoice Count"},
+                    {"field": "pref_amount", "headerName": "Preference Invoice Amount", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}},
+                    {"field": "hist_amount", "headerName": "Historical Invoice Amount", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}},
+                ],
+                style={"height": None},
+                getRowStyle={
+                    "styleConditions": [
+                        {"condition": "params.rowIndex % 2 === 1", "style": {"backgroundColor": "var(--bs-secondary-bg)"}},
+                    ],
+                    "defaultStyle": {"backgroundColor": "var(--bs-body-bg)"},
+                },
+                dashGridOptions={"domLayout": "autoHeight"},
+            ),
         ])
      ])
 
@@ -233,6 +300,19 @@ def update_summary(nv_rowData):
     diff = (pref_wavg - hist_wavg) / hist_wavg * 100
     return (f"${total_transfers:,.2f}", f"${total_new_value:,.2f}", f"${net_new_value:,.2f}",
             f"{hist_wavg:.2f}", f"{pref_wavg:.2f}", f"{diff:.2f}%")
+
+@callback(
+    Output("ocb_grid", "rowData"),
+    Input("ocb-start", "value"),
+    Input("ocb-end", "value"),
+    Input("ocb-step", "value")
+)
+def update_ocb_grid(start, end, step):
+    start = int(start) if start is not None else 0
+    end = int(end) if end is not None else 100
+    step = int(step) if step is not None else 5
+    df = build_ocb_data(start, end, step)
+    return df.to_dict("records")
  
 @callback(
     Output("hist-total-output", "children"),
