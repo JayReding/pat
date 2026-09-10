@@ -242,6 +242,7 @@ def load_case(subcase_id):
     pref_dates = pd.to_datetime(df_preference['Payment Date'])
     return {
         'subcase_id': int(subcase_id),
+        'master_id': master['master_id'],
         'master_name': master['case_name'],
         'master_number': master['case_number'],
         'jurisdiction': master['jurisdiction'],
@@ -270,25 +271,51 @@ app.title  = "Preference Analysis Tool"
 
 app.layout = html.Div(style={"padding": "20px"}, children=[
     html.H1(children='Preference Analysis Tool'),
-    dbc.Card([
-        dbc.CardHeader(html.Strong('Master Bankruptcy Case')),
-        dbc.CardBody([
-            html.Div(id="master-info", children=[
-                html.Div(f"Case Name: {_init_case['master_name']}   |   Case Number: {_init_case['master_number']}"),
-                html.Div(f"Jurisdiction: {_init_case['jurisdiction']}   |   Judge: {_init_case['judge']}"),
-                html.Div(f"Petition Date: {_init_case['petition_date']}   |   Preference Start Date: {_init_case['pref_start']}"),
+    html.Div(style={"marginBottom": "20px"}, children=[
+        dbc.Card([
+            dbc.CardHeader(className="d-flex justify-content-between align-items-center", children=[
+                html.Strong('Case Selection'),
+                dbc.Button(
+                    html.I(id="sidebar-toggle-icon", className="fa-solid fa-chevron-up"),
+                    id="sidebar-toggle",
+                    color="link",
+                ),
             ]),
-            html.Hr(),
-            html.Label('Subcase', htmlFor="subcase-selector"),
-            dcc.Dropdown(
-                id="subcase-selector",
-                options=store.list_subcase_options(),
-                value=_init_case['subcase_id'],
-                clearable=False,
-            ),
+            dbc.Collapse(id="sidebar-collapse", is_open=True, children=[
+                dbc.CardBody(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "gap": "20px", "flexWrap": "wrap"}, children=[
+                    html.Div(id="master-info", children=[
+                        html.Div(f"Case Name: {_init_case['master_name']}   |   Case Number: {_init_case['master_number']}"),
+                        html.Div(f"Jurisdiction: {_init_case['jurisdiction']}   |   Judge: {_init_case['judge']}"),
+                        html.Div(f"Petition Date: {_init_case['petition_date']}   |   Preference Start Date: {_init_case['pref_start']}"),
+                    ]),
+                    html.Div(style={"display": "flex", "gap": "16px", "alignItems": "flex-end", "flexWrap": "wrap"}, children=[
+                        html.Div(children=[
+                            html.Label('Master Bankruptcy Case', htmlFor="master-selector"),
+                            dcc.Dropdown(
+                                id="master-selector",
+                                options=store.list_master_options(),
+                                value=_init_case['master_id'],
+                                clearable=False,
+                                style={"width": "300px"},
+                            ),
+                        ]),
+                        html.Div(children=[
+                            html.Label('Subcase', htmlFor="subcase-selector"),
+                            dcc.Dropdown(
+                                id="subcase-selector",
+                                options=store.list_subcase_options(_init_case['master_id']),
+                                value=_init_case['subcase_id'],
+                                clearable=False,
+                                style={"width": "300px"},
+                            ),
+                        ]),
+                    ]),
+                ]),
+            ]),
         ]),
-    ], className="mb-3"),
-     dcc.Tabs([
+    ]),
+    html.Div(children=[
+            dcc.Tabs([
          dcc.Tab(id="summary", label='Case Summary', children=[
             html.H3(children='Case Summary'),
             dbc.ListGroup([
@@ -420,7 +447,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             ]),
         ])
      ])
-
+    ])
 ])
 
 @callback(
@@ -566,6 +593,8 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
     return {"start": sel["start"], "end": idx}, start, end, step, False
 
 @callback(
+    Output("subcase-selector", "options"),
+    Output("subcase-selector", "value"),
     Output("master-info", "children"),
     Output("historical", "rowData"),
     Output("preference", "rowData"),
@@ -576,12 +605,22 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
     Output("hist-period-invoice-count", "children"),
     Output("pref-period-invoice-count", "children"),
     Output("ocb-restore", "data"),
+    Input("master-selector", "value"),
     Input("subcase-selector", "value"),
     prevent_initial_call=True
 )
-def switch_subcase(subcase_id):
+def selection_changed(master_id, subcase_id):
+    trig = dash.callback_context.triggered[0]["prop_id"]
+    no_update = dash.no_update
+
+    if trig == "master-selector.value":
+        opts = store.list_subcase_options(master_id)
+        first_id = opts[0]["value"] if opts else None
+        return (opts, first_id) + (no_update,) * 10
+
     if subcase_id is None:
         raise PreventUpdate
+
     info = load_case(subcase_id)
     store.save_app_state(subcase_id)
     master_info = [
@@ -590,6 +629,8 @@ def switch_subcase(subcase_id):
         html.Div(f"Petition Date: {info['petition_date']}   |   Preference Start Date: {info['pref_start']}"),
     ]
     return (
+        no_update,
+        no_update,
         master_info,
         df_historical.to_dict('records'),
         df_preference.to_dict('records'),
@@ -602,6 +643,16 @@ def switch_subcase(subcase_id):
         {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
          'step': info['ocb_step'], 'total': info['ocb_total_flag']},
     )
+
+@callback(
+    Output("sidebar-collapse", "is_open"),
+    Output("sidebar-toggle-icon", "className"),
+    Input("sidebar-toggle", "n_clicks"),
+    State("sidebar-collapse", "is_open"),
+    prevent_initial_call=True
+)
+def toggle_sidebar(n_clicks, is_open):
+    return (not is_open), ("fa-solid fa-chevron-down" if is_open else "fa-solid fa-chevron-up")
 
 @callback(
     Output("ocb_grid", "getRowStyle"),

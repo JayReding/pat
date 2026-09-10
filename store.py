@@ -111,17 +111,33 @@ def subcase_exists(subcase_id):
     return bool(row[0])
 
 
-def list_subcase_options():
+def list_master_options():
     conn = _connect_cases()
     rows = conn.execute('''
-        SELECT s.id, s.transferee_name, s.adversary_number, m.case_name
-        FROM subcases s JOIN master_cases m ON m.id = s.master_case_id
-        ORDER BY m.id, s.id
+        SELECT id, case_name, case_number
+        FROM master_cases
+        ORDER BY id
     ''').fetchall()
     conn.close()
+    return [{"label": f"{name} (#{number})", "value": mid} for mid, name, number in rows]
+
+
+def list_subcase_options(master_id=None):
+    conn = _connect_cases()
+    sql = '''
+        SELECT s.id, s.transferee_name, s.adversary_number
+        FROM subcases s
+    '''
+    params = ()
+    if master_id is not None:
+        sql += ' WHERE s.master_case_id = ?'
+        params = (int(master_id),)
+    sql += ' ORDER BY s.id'
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
     options = []
-    for subcase_id, name, adv, case_name in rows:
-        label = f"{name} ({adv}) - {case_name}" if adv else f"{name} - {case_name}"
+    for subcase_id, name, adv in rows:
+        label = f"{name} ({adv})" if adv else name
         options.append({"label": label, "value": subcase_id})
     return options
 
