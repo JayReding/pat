@@ -1,5 +1,6 @@
 # Import packages
 from dash import Dash, html, dcc, callback, Output, Input, State
+import dash
 import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -102,6 +103,56 @@ def build_ocb_data(start=0, end=100, step=5):
 
 
 df_ocb = build_ocb_data()
+
+
+def ocb_default_style():
+    return {
+        "styleConditions": [
+            {"condition": "params.rowIndex % 2 === 1", "style": {"backgroundColor": "var(--bs-secondary-bg)"}},
+        ],
+        "defaultStyle": {"backgroundColor": "var(--bs-body-bg)"},
+    }
+
+
+def ocb_range_style(a, b):
+    return {
+        "styleConditions": [
+            {"condition": f"params.rowIndex >= {a} && params.rowIndex <= {b}", "style": {"backgroundColor": "var(--bs-success-bg-subtle)"}},
+            {"condition": "params.rowIndex % 2 === 1", "style": {"backgroundColor": "var(--bs-secondary-bg)"}},
+        ],
+        "defaultStyle": {"backgroundColor": "var(--bs-body-bg)"},
+    }
+
+
+def ocb_pending_style(idx):
+    return {
+        "styleConditions": [
+            {"condition": f"params.rowIndex === {idx}", "style": {"backgroundColor": "var(--bs-warning-bg-subtle)"}},
+            {"condition": "params.rowIndex % 2 === 1", "style": {"backgroundColor": "var(--bs-secondary-bg)"}},
+        ],
+        "defaultStyle": {"backgroundColor": "var(--bs-body-bg)"},
+    }
+
+
+def ocb_label_bounds(label, start, end):
+    if label.startswith("< "):
+        return None, start - 1
+    if label.startswith("> "):
+        return end + 1, None
+    lo, hi = label.split("-")
+    return int(lo), int(hi)
+
+
+def ocb_row_index(value, df, start, end):
+    for i, lab in enumerate(df["date_range"]):
+        lo, hi = ocb_label_bounds(lab, start, end)
+        if lo is None:
+            lo = float("-inf")
+        if hi is None:
+            hi = float("inf")
+        if lo <= value <= hi:
+            return i
+    return 0
 
 
 
@@ -207,42 +258,48 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
         ]),
          dcc.Tab(id="ocb", label='Ordinary Course', children=[
             html.H3(children='Ordinary Course'),
+            dcc.Store(id="ocb-range", data=None),
+            dcc.Store(id="ocb-total-range-flag", data=False),
             dbc.Row([
                 dbc.Col([
-                    html.Label('Start Range', htmlFor="ocb-start"),
-                    dcc.Dropdown(id="ocb-start", options=[{"label": str(i), "value": i} for i in range(-5, 21)], value=0, clearable=False, searchable=False),
-                ], width=4),
+                    html.Div(id="ocb-range-status", className="mb-3"),
+                    html.Div(id="ocb-hist-coverage", className="mb-3"),
+                    html.Div(id="ocb-range-warning", className="mb-3"),
+                    html.Div(className="mb-3", children=[
+                        html.Label('Start Range', htmlFor="ocb-start"),
+                        dcc.Dropdown(id="ocb-start", options=[{"label": str(i), "value": i} for i in range(-5, 21)], value=0, clearable=False, searchable=False),
+                    ]),
+                    html.Div(className="mb-3", children=[
+                        html.Label('End Range', htmlFor="ocb-end"),
+                        dcc.Dropdown(id="ocb-end", options=[{"label": str(i), "value": i} for i in range(100, 301)], value=100, clearable=False, searchable=False),
+                    ]),
+                    html.Div(className="mb-3", children=[
+                        html.Label('Step Size', htmlFor="ocb-step"),
+                        dbc.Select(id="ocb-step", options=[{"label": str(i), "value": i} for i in range(1, 11)], value=5),
+                    ]),
+                    dbc.Button("+/- 15 Days", id="ocb-plus15", color="secondary", className="mt-2 w-100"),
+                    dbc.Button("Total Range", id="ocb-total-range", color="secondary", className="mt-2 w-100"),
+                    dbc.Button("Clear OCB Range", id="ocb-clear", color="primary", className="mt-2 w-100"),
+                ], width=3),
                 dbc.Col([
-                    html.Label('End Range', htmlFor="ocb-end"),
-                    dcc.Dropdown(id="ocb-end", options=[{"label": str(i), "value": i} for i in range(100, 301)], value=100, clearable=False, searchable=False),
-                ], width=4),
-                dbc.Col([
-                    html.Label('Step Size', htmlFor="ocb-step"),
-                    dbc.Select(id="ocb-step", options=[{"label": str(i), "value": i} for i in range(1, 11)], value=5),
-                ], width=4),
+                    dag.AgGrid(
+                        id="ocb_grid",
+                        rowData=df_ocb.to_dict('records'),
+                        columnDefs=[
+                            {"field": "date_range", "headerName": "Date Range"},
+                            {"field": "pref_pct", "headerName": "Preference % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
+                            {"field": "hist_pct", "headerName": "Historical % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
+                            {"field": "pct_diff", "headerName": "Percentage Difference", "valueFormatter": {"function": "params.value != null ? d3.format('.2f')(params.value) + '%' : ''"}},
+                            {"field": "pref_count", "headerName": "Preference Invoice Count"},
+                            {"field": "hist_count", "headerName": "Historical Invoice Count"},
+                            {"field": "pref_amount", "headerName": "Preference Invoice Amount", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}},
+                            {"field": "hist_amount", "headerName": "Historical Invoice Amount", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}},
+                        ],
+                        style={"height": None},
+                        dashGridOptions={"domLayout": "autoHeight"},
+                    ),
+                ], width=9),
             ]),
-            dag.AgGrid(
-                id="ocb_grid",
-                rowData=df_ocb.to_dict('records'),
-                columnDefs=[
-                    {"field": "date_range", "headerName": "Date Range"},
-                    {"field": "pref_pct", "headerName": "Preference % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
-                    {"field": "hist_pct", "headerName": "Historical % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
-                    {"field": "pct_diff", "headerName": "Percentage Difference", "valueFormatter": {"function": "params.value != null ? d3.format('.2f')(params.value) + '%' : ''"}},
-                    {"field": "pref_count", "headerName": "Preference Invoice Count"},
-                    {"field": "hist_count", "headerName": "Historical Invoice Count"},
-                    {"field": "pref_amount", "headerName": "Preference Invoice Amount", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}},
-                    {"field": "hist_amount", "headerName": "Historical Invoice Amount", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}},
-                ],
-                style={"height": None},
-                getRowStyle={
-                    "styleConditions": [
-                        {"condition": "params.rowIndex % 2 === 1", "style": {"backgroundColor": "var(--bs-secondary-bg)"}},
-                    ],
-                    "defaultStyle": {"backgroundColor": "var(--bs-body-bg)"},
-                },
-                dashGridOptions={"domLayout": "autoHeight"},
-            ),
         ])
      ])
 
@@ -313,6 +370,135 @@ def update_ocb_grid(start, end, step):
     step = int(step) if step is not None else 5
     df = build_ocb_data(start, end, step)
     return df.to_dict("records")
+
+@callback(
+    Output("ocb-range", "data"),
+    Output("ocb-start", "value"),
+    Output("ocb-end", "value"),
+    Output("ocb-total-range-flag", "data"),
+    Input("ocb-total-range", "n_clicks"),
+    Input("ocb-plus15", "n_clicks"),
+    Input("ocb_grid", "cellClicked"),
+    Input("ocb-start", "value"),
+    Input("ocb-end", "value"),
+    Input("ocb-step", "value"),
+    Input("ocb-clear", "n_clicks"),
+    State("ocb-range", "data"),
+    State("ocb-total-range-flag", "data"),
+    prevent_initial_call=True
+)
+def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, sel, flag):
+    start = int(start) if start is not None else 0
+    end = int(end) if end is not None else 100
+    step = int(step) if step is not None else 5
+    trig = dash.callback_context.triggered[0]["prop_id"]
+
+    if trig == "ocb-plus15.n_clicks":
+        anchor = round(calc_weighted_dso(df_historical))
+        min_days = anchor - 15
+        max_days = anchor + 15
+        new_start = max(-5, min(min(start, min_days), 20))
+        new_end = max(100, min(max(end, max_days), 300))
+        df_cur = build_ocb_data(new_start, new_end, step)
+        r0 = ocb_row_index(min_days, df_cur, new_start, new_end)
+        r1 = ocb_row_index(max_days, df_cur, new_start, new_end)
+        flag_out = (new_start != start) or (new_end != end)
+        return {"start": r0, "end": r1}, new_start, new_end, flag_out
+
+    if trig == "ocb-total-range.n_clicks":
+        min_days = int(df_historical["Invoice to Payment"].min())
+        max_days = int(df_historical["Invoice to Payment"].max())
+        new_start = max(-5, min(min(start, min_days), 20))
+        new_end = max(100, min(max(end, max_days), 300))
+        df_cur = build_ocb_data(new_start, new_end, step)
+        r0 = ocb_row_index(min_days, df_cur, new_start, new_end)
+        r1 = ocb_row_index(max_days, df_cur, new_start, new_end)
+        flag_out = (new_start != start) or (new_end != end)
+        return {"start": r0, "end": r1}, new_start, new_end, flag_out
+
+    if trig == "ocb-clear.n_clicks":
+        return None, start, end, False
+
+    if trig != "ocb_grid.cellClicked":
+        if flag:
+            return dash.no_update, start, end, False
+        return None, start, end, False
+
+    idx = int(click["rowIndex"])
+    if sel is None or sel.get("end") is not None:
+        return {"start": idx, "end": None}, start, end, False
+    return {"start": sel["start"], "end": idx}, start, end, False
+
+@callback(
+    Output("ocb_grid", "getRowStyle"),
+    Output("ocb-range-status", "children"),
+    Output("ocb-hist-coverage", "children"),
+    Input("ocb-range", "data"),
+    State("ocb-start", "value"),
+    State("ocb-end", "value"),
+    State("ocb-step", "value")
+)
+def apply_ocb_range(sel, start, end, step):
+    start = int(start) if start is not None else 0
+    end = int(end) if end is not None else 100
+    step = int(step) if step is not None else 5
+    if sel is None:
+        df_preference["Ordinary"] = 0
+        return ocb_default_style(), "No OCB range selected.", "Historical invoices captured in range: —"
+    if sel.get("end") is None:
+        df_preference["Ordinary"] = 0
+        idx = int(sel["start"])
+        df_cur = build_ocb_data(start, end, step)
+        label = df_cur["date_range"].iloc[idx]
+        status = f"Range start selected: {label} — click a second row to complete the range."
+        return ocb_pending_style(idx), status, "Historical invoices captured in range: —"
+    a, b = sorted((int(sel["start"]), int(sel["end"])))
+    df_cur = build_ocb_data(start, end, step)
+    s_label = df_cur["date_range"].iloc[a]
+    e_label = df_cur["date_range"].iloc[b]
+    lower, _ = ocb_label_bounds(s_label, start, end)
+    _, upper = ocb_label_bounds(e_label, start, end)
+    days = df_preference["Invoice to Payment"]
+    mask = pd.Series(True, index=df_preference.index)
+    if lower is not None:
+        mask &= days >= lower
+    if upper is not None:
+        mask &= days <= upper
+    df_preference.loc[mask, "Ordinary"] = 1
+    status = f"OCB range: {s_label} to {e_label} — {int(mask.sum())} preference invoice(s) marked as Ordinary."
+    hist_days = df_historical["Invoice to Payment"]
+    hist_mask = pd.Series(True, index=df_historical.index)
+    if lower is not None:
+        hist_mask &= hist_days >= lower
+    if upper is not None:
+        hist_mask &= hist_days <= upper
+    coverage = f"Historical invoices captured in range: {int(hist_mask.sum())} of {len(df_historical)} ({hist_mask.mean() * 100:.2f}%)"
+    return ocb_range_style(a, b), status, coverage
+
+@callback(
+    Output("ocb-range-warning", "children"),
+    Input("ocb-range", "data"),
+    State("ocb-start", "value"),
+    State("ocb-end", "value"),
+    State("ocb-step", "value")
+)
+def update_ocb_warning(sel, start, end, step):
+    if sel is None or sel.get("end") is None:
+        return ""
+    start = int(start) if start is not None else 0
+    end = int(end) if end is not None else 100
+    step = int(step) if step is not None else 5
+    a, b = sorted((int(sel["start"]), int(sel["end"])))
+    df_cur = build_ocb_data(start, end, step)
+    lower, _ = ocb_label_bounds(df_cur["date_range"].iloc[a], start, end)
+    _, upper = ocb_label_bounds(df_cur["date_range"].iloc[b], start, end)
+    if lower is not None and upper is not None:
+        total_days = upper - lower
+    else:
+        total_days = float("inf")
+    if total_days > 100:
+        return html.Span("Total ranges broader than 100 days may be unordinary in many jurisdictions.", style={"color": "red", "fontWeight": "bold"})
+    return ""
  
 @callback(
     Output("hist-total-output", "children"),
