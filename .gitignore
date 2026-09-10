@@ -1,0 +1,11 @@
+# Ignore cache"
+__pycache__/
+
+# Ignore db browser file
+pat_test.sqbpro
+
+# Ignore OpenCode file
+opencode.json
+
+# Ignore environment files
+.env/
