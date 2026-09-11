@@ -9,20 +9,17 @@ import pandas as pd
 import numpy as np
 
 import analysis
-import state
 import store
 import auth
+import session
 
 # Incorporate data
 store.init_cases_db()
 store.init_state_db()
 store.init_users_db()
 
-# Explicit per-case state (previously implicit module globals)
-STATE = state.CaseState()
 
-
-def load_case(subcase_id):
+def load_case(st, subcase_id):
     master = store.get_master_by_subcase(subcase_id)
     petition_date = pd.Timestamp(master['petition_date'])
     pref_start = petition_date - pd.Timedelta(days=90)
@@ -30,13 +27,14 @@ def load_case(subcase_id):
     p = petition_date.strftime('%Y-%m-%d')
 
     frames = store.load_case_frames(subcase_id, s, p)
-    STATE.df_historical = frames['historical']
-    STATE.df_preference = frames['preference']
-    STATE.df_transfers = frames['transfers']
-    STATE.df_newvalue = frames['newvalue']
-    STATE.active_subcase_id = int(subcase_id)
+    st.df_historical = frames['historical']
+    st.df_preference = frames['preference']
+    st.df_transfers = frames['transfers']
+    st.df_newvalue = frames['newvalue']
+    st.active_subcase_id = int(subcase_id)
+    st.loaded = True
 
-    STATE.df_preference['Ordinary'] = 0
+    st.df_preference['Ordinary'] = 0
 
     settings = store.load_case_settings(subcase_id)
     ocb_range = settings.get('ocb_range')
@@ -50,37 +48,37 @@ def load_case(subcase_id):
     ordinary_inv = []
     if ocb_range is not None:
         a, b = sorted((ocb_range['start'], ocb_range['end']))
-        df_cur = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, ocb_start, ocb_end, ocb_step)
+        df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, ocb_start, ocb_end, ocb_step)
         s_label = df_cur['date_range'].iloc[a]
         e_label = df_cur['date_range'].iloc[b]
         lower, _ = analysis.ocb_label_bounds(s_label, ocb_start, ocb_end)
         _, upper = analysis.ocb_label_bounds(e_label, ocb_start, ocb_end)
-        days = STATE.df_preference['Invoice to Payment']
-        mask = pd.Series(True, index=STATE.df_preference.index)
+        days = st.df_preference['Invoice to Payment']
+        mask = pd.Series(True, index=st.df_preference.index)
         if lower is not None:
             mask &= days >= lower
         if upper is not None:
             mask &= days <= upper
-        STATE.df_preference.loc[mask, 'Ordinary'] = 1
-        ordinary_inv = STATE.df_preference.loc[mask, 'Invoice Number'].dropna().tolist()
+        st.df_preference.loc[mask, 'Ordinary'] = 1
+        ordinary_inv = st.df_preference.loc[mask, 'Invoice Number'].dropna().tolist()
 
-    STATE.df_snv = analysis.calculate_new_value(pd.concat([STATE.df_transfers, STATE.df_newvalue], ignore_index=True))
+    st.df_snv = analysis.calculate_new_value(pd.concat([st.df_transfers, st.df_newvalue], ignore_index=True))
     nv_settings = settings.get('nv_settings')
     if nv_settings:
         nv_lookup = {s['invoice_number']: s for s in nv_settings if s.get('invoice_number') is not None}
-        STATE.df_snv['Remove'] = STATE.df_snv['Invoice Number'].map(
+        st.df_snv['Remove'] = st.df_snv['Invoice Number'].map(
             lambda inv: nv_lookup.get(inv, {}).get('remove', False) if pd.notna(inv) else False
         )
-        STATE.df_snv['Ordinary Exclusion'] = STATE.df_snv['Invoice Number'].map(
+        st.df_snv['Ordinary Exclusion'] = st.df_snv['Invoice Number'].map(
             lambda inv: (nv_lookup.get(inv, {}).get('reason') or '') if pd.notna(inv) else ''
         )
-    STATE.df_snv = analysis.sync_new_value(STATE.df_snv, ordinary_inv)
-    STATE.df_snv = analysis.finalize_new_value(STATE.df_snv)
-    STATE.df_ocb = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical)
+    st.df_snv = analysis.sync_new_value(st.df_snv, ordinary_inv)
+    st.df_snv = analysis.finalize_new_value(st.df_snv)
+    st.df_ocb = analysis.build_ocb_data(st.df_preference, st.df_historical)
 
-    hist_dates = pd.to_datetime(STATE.df_historical['Payment Date'])
-    pref_dates = pd.to_datetime(STATE.df_preference['Payment Date'])
-    return {
+    hist_dates = pd.to_datetime(st.df_historical['Payment Date'])
+    pref_dates = pd.to_datetime(st.df_preference['Payment Date'])
+    info = {
         'subcase_id': int(subcase_id),
         'master_id': master['master_id'],
         'master_name': master['case_name'],
@@ -102,9 +100,15 @@ def load_case(subcase_id):
         'ocb_step': ocb_step,
         'ordinary_inv': ordinary_inv,
     }
+    st.meta = info
+    return info
 
 
-_init_case = load_case(store.active_subcase_id())
+def _session_loader(st):
+    load_case(st, store.active_subcase_id())
+
+
+session.set_loader(_session_loader)
 
 
 # Initialize the app
@@ -125,17 +129,14 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
         "border": "1px solid var(--bs-border-color)",
         "backgroundColor": "var(--bs-tertiary-bg)",
     }, children=[
-        html.Div(id="master-info", children=[
-            html.Div(f"Transferee: {_init_case['transferee']}   |   Adversary Number: {_init_case['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
-            html.Div(f"Main Case: {_init_case['master_name']}   |   Preference Period: {_init_case['pref_start']} - {_init_case['petition_date']}"),
-        ]),
+        html.Div(id="master-info", children=[]),
         html.Div(style={"display": "flex", "gap": "16px", "alignItems": "flex-end", "flexWrap": "wrap"}, children=[
             html.Div(children=[
                 html.Label('Master Bankruptcy Case', htmlFor="master-selector"),
                 dcc.Dropdown(
                     id="master-selector",
                     options=store.list_master_options(),
-                    value=_init_case['master_id'],
+                    value=None,
                     clearable=False,
                     style={"width": "300px"},
                 ),
@@ -144,8 +145,8 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                 html.Label('Subcase', htmlFor="subcase-selector"),
                 dcc.Dropdown(
                     id="subcase-selector",
-                    options=store.list_subcase_options(_init_case['master_id']),
-                    value=_init_case['subcase_id'],
+                    options=[],
+                    value=None,
                     clearable=False,
                     style={"width": "300px"},
                 ),
@@ -172,10 +173,10 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             ]),
         ]),
          dcc.Tab(label='Historical Period', children=[
-            html.H3(id="hist-period-title", children=_init_case['hist_title']),
+            html.H3(id="hist-period-title", children=""),
             dag.AgGrid(
                 id="historical",
-                rowData=STATE.df_historical.to_dict('records'),
+                rowData=[],
                 getRowStyle=analysis.ocb_default_style(),
                 style={"height": "600px"},
                 columnDefs=[
@@ -189,7 +190,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                     {"field": "Days Past Due"},
                 ]
             ),
-            html.Div(id="hist-period-invoice-count", children=_init_case['hist_count']),
+            html.Div(id="hist-period-invoice-count", children=""),
             html.Div(id="hist-total-output"),
             html.Div(id="hist-average_dso"),
             html.Div(id="hist-average_dpd"),
@@ -199,10 +200,10 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
     ]),
 
         dcc.Tab(label='Preference Period', children=[
-            html.H3(id="pref-period-title", children=_init_case['pref_title']),
+            html.H3(id="pref-period-title", children=""),
             dag.AgGrid(
               id="preference",
-              rowData=STATE.df_preference.to_dict('records'),
+              rowData=[],
               getRowStyle=analysis.ocb_default_style(),
               style={"height": "600px"},
               columnDefs=[
@@ -216,7 +217,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                 {"field": "Days Past Due"},
             ]
         ),
-        html.Div(id="pref-period-invoice-count", children=_init_case['pref_count']),
+        html.Div(id="pref-period-invoice-count", children=""),
         html.Div(id="pref-total-output"),
         html.Div(id="pref-average_dso"),
         html.Div(id="pref-average_dpd"),
@@ -229,7 +230,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             html.P(children='This is the content for the New Value tab.'),
             dag.AgGrid(
                 id="new_value",
-                rowData=STATE.df_snv.to_dict('records'),
+                rowData=[],
                 getRowStyle=analysis.ocb_default_style(),
                 style={"height": "600px"},
                 columnDefs=[
@@ -249,9 +250,9 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
         ]),
          dcc.Tab(id="ocb", label='Ordinary Course', children=[
             html.H3(children='Ordinary Course'),
-            dcc.Store(id="ocb-range", data=_init_case['ocb_range']),
-            dcc.Store(id="ocb-total-range-flag", data=_init_case['ocb_total_flag']),
-            dcc.Store(id="ocb-ordinary-invoices", data=_init_case['ordinary_inv']),
+            dcc.Store(id="ocb-range", data=None),
+            dcc.Store(id="ocb-total-range-flag", data=False),
+            dcc.Store(id="ocb-ordinary-invoices", data=None),
             dcc.Store(id="ocb-restore", data=None),
             dbc.Row([
                 dbc.Col([
@@ -264,15 +265,15 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                     html.Div(id="ocb-range-warning", className="mb-3"),
                     html.Div(className="mb-3", children=[
                         html.Label('Start Range', htmlFor="ocb-start"),
-                        dcc.Dropdown(id="ocb-start", options=[{"label": str(i), "value": i} for i in range(-5, 21)], value=_init_case['ocb_start'], clearable=False, searchable=False),
+                        dcc.Dropdown(id="ocb-start", options=[{"label": str(i), "value": i} for i in range(-5, 21)], value=None, clearable=False, searchable=False),
                     ]),
                     html.Div(className="mb-3", children=[
                         html.Label('End Range', htmlFor="ocb-end"),
-                        dcc.Dropdown(id="ocb-end", options=[{"label": str(i), "value": i} for i in range(100, 301)], value=_init_case['ocb_end'], clearable=False, searchable=False),
+                        dcc.Dropdown(id="ocb-end", options=[{"label": str(i), "value": i} for i in range(100, 301)], value=None, clearable=False, searchable=False),
                     ]),
                     html.Div(className="mb-3", children=[
                         html.Label('Step Size', htmlFor="ocb-step"),
-                        dbc.Select(id="ocb-step", options=[{"label": str(i), "value": i} for i in range(1, 11)], value=_init_case['ocb_step']),
+                        dbc.Select(id="ocb-step", options=[{"label": str(i), "value": i} for i in range(1, 11)], value=None),
                     ]),
                     dbc.Button("+/- 15 Days", id="ocb-plus15", color="secondary", className="mt-2 w-100"),
                     dbc.Button("Total Range", id="ocb-total-range", color="secondary", className="mt-2 w-100"),
@@ -282,7 +283,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                 dbc.Col([
                     dag.AgGrid(
                         id="ocb_grid",
-                        rowData=STATE.df_ocb.to_dict('records'),
+                        rowData=[],
                         columnDefs=[
                             {"field": "date_range", "headerName": "Date Range"},
                             {"field": "pref_pct", "headerName": "Preference % of Invoices", "valueFormatter": {"function": "d3.format('.2f')(params.value) + '%'"}},
@@ -383,10 +384,11 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
 ])
 
 @callback(
-    Output("new_value", "rowData"),
+    Output("new_value", "rowData", allow_duplicate=True),
     Input("new_value", "cellValueChanged"),
     Input("ocb-ordinary-invoices", "data"),
-    State("new_value", "rowData")
+    State("new_value", "rowData"),
+    prevent_initial_call=True
 )
 def update_new_value(cellChange, ordinary_invoices, rowData):
     df = pd.DataFrame(rowData)
@@ -398,16 +400,17 @@ def update_new_value(cellChange, ordinary_invoices, rowData):
 
 @callback(
     Output("nv-net-preference-total", "children"),
-    Input("new_value", "rowData")
+    Input("new_value", "rowData"),
+    prevent_initial_call=True
 )
 def update_nv_totals(rowData):
     df = pd.DataFrame(rowData)
     total = df["Net Preference"].iloc[-1]
     return f"Net Preference Total: ${total:,.2f}"
 
-def _ocb_transfer_shares():
-    tot = STATE.df_preference.groupby("Transfer Number")["Invoice Amount"].sum()
-    ord_tot = STATE.df_preference[STATE.df_preference["Ordinary"] == 1].groupby("Transfer Number")["Invoice Amount"].sum()
+def _ocb_transfer_shares(st):
+    tot = st.df_preference.groupby("Transfer Number")["Invoice Amount"].sum()
+    ord_tot = st.df_preference[st.df_preference["Ordinary"] == 1].groupby("Transfer Number")["Invoice Amount"].sum()
     return tot, ord_tot
 
 
@@ -422,18 +425,20 @@ def _ocb_transfer_shares():
     Output("ocb-net-pref-defenses", "children"),
     Input("new_value", "rowData"),
     Input("ocb-ordinary-invoices", "data"),
-    Input("ocb-range", "data")
+    Input("ocb-range", "data"),
+    prevent_initial_call=True
 )
 def update_summary(nv_rowData, ordinary_invoices, ocb_range):
+    st = session.get_state()
     df_nv = pd.DataFrame(nv_rowData)
-    total_transfers = STATE.df_transfers["Transfer Amount"].sum()
+    total_transfers = st.df_transfers["Transfer Amount"].sum()
     total_new_value = df_nv["Allowed New Value"].sum()
     net_new_value = df_nv["Net Preference"].iloc[-1]
-    hist_wavg = analysis.calc_weighted_dso(STATE.df_historical)
-    pref_wavg = analysis.calc_weighted_dso(STATE.df_preference)
+    hist_wavg = analysis.calc_weighted_dso(st.df_historical)
+    pref_wavg = analysis.calc_weighted_dso(st.df_preference)
     diff = (pref_wavg - hist_wavg) / hist_wavg * 100
 
-    tot_shares, ord_shares = _ocb_transfer_shares()
+    tot_shares, ord_shares = _ocb_transfer_shares(st)
     net_pref_defenses = analysis.calc_net_pref_defenses(df_nv, tot_shares, ord_shares)
 
     return (f"${total_transfers:,.2f}", f"${total_new_value:,.2f}", f"${net_new_value:,.2f}",
@@ -448,10 +453,11 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     Input("ocb-step", "value")
 )
 def update_ocb_grid(start, end, step):
+    st = session.get_state()
     start = int(start) if start is not None else 0
     end = int(end) if end is not None else 100
     step = int(step) if step is not None else 5
-    df = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, start, end, step)
+    df = analysis.build_ocb_data(st.df_preference, st.df_historical, start, end, step)
     return df.to_dict("records")
 
 @callback(
@@ -473,6 +479,7 @@ def update_ocb_grid(start, end, step):
     prevent_initial_call=True
 )
 def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, restore, sel, flag):
+    st = session.get_state()
     start = int(start) if start is not None else 0
     end = int(end) if end is not None else 100
     step = int(step) if step is not None else 5
@@ -484,23 +491,23 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
                 int(r.get('step') or step), bool(r.get('total')))
 
     if trig == "ocb-plus15.n_clicks":
-        anchor = round(analysis.calc_weighted_dso(STATE.df_historical))
+        anchor = round(analysis.calc_weighted_dso(st.df_historical))
         min_days = anchor - 15
         max_days = anchor + 15
         new_start = max(-5, min(min(start, min_days), 20))
         new_end = max(100, min(max(end, max_days), 300))
-        df_cur = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, new_start, new_end, step)
+        df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, new_start, new_end, step)
         r0 = analysis.ocb_row_index(min_days, df_cur, new_start, new_end)
         r1 = analysis.ocb_row_index(max_days, df_cur, new_start, new_end)
         flag_out = (new_start != start) or (new_end != end)
         return {"start": r0, "end": r1}, new_start, new_end, step, flag_out
 
     if trig == "ocb-total-range.n_clicks":
-        min_days = int(STATE.df_historical["Invoice to Payment"].min())
-        max_days = int(STATE.df_historical["Invoice to Payment"].max())
+        min_days = int(st.df_historical["Invoice to Payment"].min())
+        max_days = int(st.df_historical["Invoice to Payment"].max())
         new_start = max(-5, min(min(start, min_days), 20))
         new_end = max(100, min(max(end, max_days), 300))
-        df_cur = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, new_start, new_end, step)
+        df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, new_start, new_end, step)
         r0 = analysis.ocb_row_index(min_days, df_cur, new_start, new_end)
         r1 = analysis.ocb_row_index(max_days, df_cur, new_start, new_end)
         flag_out = (new_start != start) or (new_end != end)
@@ -510,9 +517,7 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
         return None, start, end, step, False
 
     if trig != "ocb_grid.cellClicked":
-        if flag:
-            return dash.no_update, start, end, step, False
-        return None, start, end, step, False
+        return dash.no_update, start, end, step, dash.no_update
 
     idx = int(click["rowIndex"])
     if sel is None or sel.get("end") is not None:
@@ -548,8 +553,9 @@ def selection_changed(master_id, subcase_id):
     if subcase_id is None:
         raise PreventUpdate
 
-    info = load_case(subcase_id)
+    info = load_case(session.get_state(), subcase_id)
     store.save_app_state(subcase_id)
+    st = session.get_state()
     master_info = [
         html.Div(f"Transferee: {info['transferee']}   |   Adversary Number: {info['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
         html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
@@ -558,10 +564,10 @@ def selection_changed(master_id, subcase_id):
         no_update,
         no_update,
         master_info,
-        STATE.df_historical.to_dict('records'),
-        STATE.df_preference.to_dict('records'),
-        STATE.df_snv.to_dict('records'),
-        STATE.df_ocb.to_dict('records'),
+        st.df_historical.to_dict('records'),
+        st.df_preference.to_dict('records'),
+        st.df_snv.to_dict('records'),
+        st.df_ocb.to_dict('records'),
         info['hist_title'],
         info['pref_title'],
         info['hist_count'],
@@ -581,42 +587,43 @@ def selection_changed(master_id, subcase_id):
     State("ocb-step", "value")
 )
 def apply_ocb_range(sel, start, end, step):
+    st = session.get_state()
     start = int(start) if start is not None else 0
     end = int(end) if end is not None else 100
     step = int(step) if step is not None else 5
     if sel is None:
-        STATE.df_preference["Ordinary"] = 0
+        st.df_preference["Ordinary"] = 0
         return analysis.ocb_default_style(), "No OCB range selected.", "Historical invoices captured in range: —", []
     if sel.get("end") is None:
-        STATE.df_preference["Ordinary"] = 0
+        st.df_preference["Ordinary"] = 0
         idx = int(sel["start"])
-        df_cur = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, start, end, step)
+        df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, start, end, step)
         label = df_cur["date_range"].iloc[idx]
         status = f"Range start selected: {label} — click a second row to complete the range."
         return analysis.ocb_pending_style(idx), status, "Historical invoices captured in range: —", []
     a, b = sorted((int(sel["start"]), int(sel["end"])))
-    df_cur = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, start, end, step)
+    df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, start, end, step)
     s_label = df_cur["date_range"].iloc[a]
     e_label = df_cur["date_range"].iloc[b]
     lower, _ = analysis.ocb_label_bounds(s_label, start, end)
     _, upper = analysis.ocb_label_bounds(e_label, start, end)
-    days = STATE.df_preference["Invoice to Payment"]
-    mask = pd.Series(True, index=STATE.df_preference.index)
+    days = st.df_preference["Invoice to Payment"]
+    mask = pd.Series(True, index=st.df_preference.index)
     if lower is not None:
         mask &= days >= lower
     if upper is not None:
         mask &= days <= upper
-    STATE.df_preference["Ordinary"] = 0
-    STATE.df_preference.loc[mask, "Ordinary"] = 1
+    st.df_preference["Ordinary"] = 0
+    st.df_preference.loc[mask, "Ordinary"] = 1
     status = f"OCB range: {s_label} to {e_label} — {int(mask.sum())} preference invoice(s) marked as Ordinary."
-    hist_days = STATE.df_historical["Invoice to Payment"]
-    hist_mask = pd.Series(True, index=STATE.df_historical.index)
+    hist_days = st.df_historical["Invoice to Payment"]
+    hist_mask = pd.Series(True, index=st.df_historical.index)
     if lower is not None:
         hist_mask &= hist_days >= lower
     if upper is not None:
         hist_mask &= hist_days <= upper
-    coverage = f"Historical invoices captured in range: {int(hist_mask.sum())} of {len(STATE.df_historical)} ({hist_mask.mean() * 100:.2f}%)"
-    ordinary_inv = STATE.df_preference.loc[mask, "Invoice Number"].dropna().tolist()
+    coverage = f"Historical invoices captured in range: {int(hist_mask.sum())} of {len(st.df_historical)} ({hist_mask.mean() * 100:.2f}%)"
+    ordinary_inv = st.df_preference.loc[mask, "Invoice Number"].dropna().tolist()
     return analysis.ocb_range_style(a, b), status, coverage, ordinary_inv
 
 @callback(
@@ -633,7 +640,8 @@ def update_ocb_warning(sel, start, end, step):
     end = int(end) if end is not None else 100
     step = int(step) if step is not None else 5
     a, b = sorted((int(sel["start"]), int(sel["end"])))
-    df_cur = analysis.build_ocb_data(STATE.df_preference, STATE.df_historical, start, end, step)
+    st = session.get_state()
+    df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, start, end, step)
     lower, _ = analysis.ocb_label_bounds(df_cur["date_range"].iloc[a], start, end)
     _, upper = analysis.ocb_label_bounds(df_cur["date_range"].iloc[b], start, end)
     if lower is not None and upper is not None:
@@ -651,7 +659,8 @@ def update_ocb_warning(sel, start, end, step):
     Output("hist-weighted_dso", "children"),
     Output("hist-weighted_dpd", "children"),
     Output("hist-skew", "children"),
-    Input("historical", "rowData")
+    Input("historical", "rowData"),
+    prevent_initial_call=True
 )
  
 def update_hist_totals(rowData):
@@ -676,17 +685,19 @@ def update_hist_totals(rowData):
     Output("pref-weighted_dso", "children"),
     Output("pref-weighted_dpd", "children"),
     Output("diff-wavg", "children"),
-    Input("preference", "rowData")
+    Input("preference", "rowData"),
+    prevent_initial_call=True
 )
 
 def update_pref_totals(rowData):
+    st = session.get_state()
     df = pd.DataFrame(rowData)
     total = df["Transfer Amount"].sum()
     average_dso = df["Invoice to Payment"].mean()
     average_dpd = df["Days Past Due"].mean()
     weighted_dso = analysis.calc_weighted_dso(df)
     weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
-    diff = analysis.compare_hist_pref(STATE.df_historical, STATE.df_preference)
+    diff = analysis.compare_hist_pref(st.df_historical, st.df_preference)
     return f"Preference Period Total Transfer Amount: ${total:,.2f}", f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}", f"Weighted DSO Difference (Historical vs Preference): {diff:.2f}%"
 
 @callback(
@@ -700,10 +711,11 @@ def update_pref_totals(rowData):
     prevent_initial_call=True
 )
 def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_rowData):
-    auth.guard_edit_subcase(STATE.active_subcase_id)
+    st = session.get_state()
+    auth.guard_edit_subcase(st.active_subcase_id)
     from datetime import datetime
     nv_settings = []
-    for row in nv_rowData:
+    for row in nv_rowData or []:
         inv = row.get("Invoice Number")
         if pd.notna(inv):
             reason = row.get('Ordinary Exclusion')
@@ -714,7 +726,7 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
                 'remove': bool(row.get('Remove', False)),
                 'reason': reason or None,
             })
-    store.save_case_settings(STATE.active_subcase_id, ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_settings)
+    store.save_case_settings(st.active_subcase_id, ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_settings)
     return f"Saved {datetime.now().strftime('%H:%M:%S')}"
 
 
@@ -906,6 +918,60 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, master_id, subcase_id):
     else:
         status = "Select a user and a target before clicking an action."
     return store.list_all_grants(), status
+
+
+@callback(
+    Output("master-info", "children", allow_duplicate=True),
+    Output("master-selector", "value", allow_duplicate=True),
+    Output("subcase-selector", "options", allow_duplicate=True),
+    Output("subcase-selector", "value", allow_duplicate=True),
+    Output("historical", "rowData", allow_duplicate=True),
+    Output("preference", "rowData", allow_duplicate=True),
+    Output("new_value", "rowData", allow_duplicate=True),
+    Output("ocb_grid", "rowData", allow_duplicate=True),
+    Output("hist-period-title", "children", allow_duplicate=True),
+    Output("pref-period-title", "children", allow_duplicate=True),
+    Output("hist-period-invoice-count", "children", allow_duplicate=True),
+    Output("pref-period-invoice-count", "children", allow_duplicate=True),
+    Output("ocb-range", "data", allow_duplicate=True),
+    Output("ocb-total-range-flag", "data", allow_duplicate=True),
+    Output("ocb-ordinary-invoices", "data", allow_duplicate=True),
+    Output("ocb-start", "value", allow_duplicate=True),
+    Output("ocb-end", "value", allow_duplicate=True),
+    Output("ocb-step", "value", allow_duplicate=True),
+    Output("ocb-restore", "data", allow_duplicate=True),
+    Input("auth-boot", "data"),
+    prevent_initial_call='initial_duplicate'
+)
+def session_boot(_):
+    st = session.get_state()
+    info = st.meta
+    master_info = [
+        html.Div(f"Transferee: {info['transferee']}   |   Adversary Number: {info['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+        html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
+    ]
+    return (
+        master_info,
+        info['master_id'],
+        store.list_subcase_options(info['master_id']),
+        info['subcase_id'],
+        st.df_historical.to_dict('records'),
+        st.df_preference.to_dict('records'),
+        st.df_snv.to_dict('records'),
+        st.df_ocb.to_dict('records'),
+        info['hist_title'],
+        info['pref_title'],
+        info['hist_count'],
+        info['pref_count'],
+        info['ocb_range'],
+        info['ocb_total_flag'],
+        info['ordinary_inv'],
+        info['ocb_start'],
+        info['ocb_end'],
+        info['ocb_step'],
+        {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
+         'step': info['ocb_step'], 'total': info['ocb_total_flag']},
+    )
 
 
 # Apply login protection to every route (including Dash callbacks)

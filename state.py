@@ -13,3 +13,5 @@ class CaseState:
     df_newvalue: Any = None
     df_snv: Any = None
     df_ocb: Any = None
+    loaded: bool = False
+    meta: Any = None
