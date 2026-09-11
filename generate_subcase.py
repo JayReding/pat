@@ -42,12 +42,14 @@ def generate(source_rows, petition_date):
         for col in ('Transfer Amount', 'Invoice Amount', 'Check Amount'):
             if row.get(col) is not None:
                 row[col] = round(_jitter(rng, row[col], *AMOUNT_RANGE), 2)
-        for col in ('Days Past Due', 'WDPD', 'WI2DEL'):
+        for col in ('WDPD', 'WI2DEL'):
             if row.get(col) is not None:
                 row[col] = round(_jitter(rng, row[col], *DAY_RANGE), 2)
+        if row.get('Days Past Due') is not None:
+            row['Days Past Due'] = int(round(_jitter(rng, row['Days Past Due'], *DAY_RANGE)))
         terms = row.get('Terms Days')
         if terms is not None:
-            row['Terms Days'] = round(_jitter(rng, terms, *DAY_RANGE), 2)
+            row['Terms Days'] = int(round(_jitter(rng, terms, *DAY_RANGE)))
 
         if lag is None:
             out.append(row)

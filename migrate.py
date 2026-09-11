@@ -22,6 +22,15 @@ SUBCASE_1 = {
 DATE_COLS = ['Payment Date', 'Invoice Date', 'Invoice Due', 'Check Date']
 
 
+def as_whole_days(value):
+    if value is None:
+        return None
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return value
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -73,7 +82,7 @@ def copy_legacy_rows(conn, subcase_id):
             subcase_id,
             get('Transfer Number'), get('Transfer Amount'), get('Invoice Number'), get('Invoice Amount'),
             get('Check Amount'), get('Payment Date'), get('Invoice Date'), get('Invoice Due'),
-            get('Terms Days'), get('Days Past Due'), get('WDPD'), get('Invoice to Payment'),
+            get('Terms Days'), as_whole_days(get('Days Past Due')), get('WDPD'), get('Invoice to Payment'),
             get('WI2DEL'), get('Age'), get('Unpaid'), get('Check Date'),
         ))
     conn.executemany(sql, prepared)
@@ -122,7 +131,7 @@ def insert_synthetic_rows(conn, subcase_id, offset):
             shift_dates(get('Invoice Date'), offset),
             shift_dates(get('Invoice Due'), offset),
             get('Terms Days'),
-            get('Days Past Due'),
+            as_whole_days(get('Days Past Due')),
             get('WDPD'),
             get('Invoice to Payment'),
             get('WI2DEL'),
