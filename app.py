@@ -112,11 +112,12 @@ session.set_loader(_session_loader)
 
 
 # Initialize the app
-app = Dash(external_stylesheets=[dbc.themes.ZEPHYR, dbc.icons.FONT_AWESOME] )
-app.title  = "Preference Analysis Tool"
+app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.ZEPHYR, dbc.icons.FONT_AWESOME])
+app.title = "Preference Analysis Tool"
 
-app.layout = html.Div(style={"padding": "20px"}, children=[
-    html.H1(children='Preference Analysis Tool'),
+
+def _analysis_page():
+    return html.Div(style={"padding": "20px"}, children=[
     html.Div(style={
         "display": "flex",
         "justifyContent": "space-between",
@@ -152,11 +153,7 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                 ),
             ]),
         ]),
-        html.Div(style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"}, children=[
-            dcc.Store(id="auth-boot", data=True),
-            html.Div(id="user-badge", className="text-muted"),
-            html.Form(children=[dbc.Button("Log out", type="submit", color="secondary", size="sm")], action="/logout", method="POST"),
-        ]),
+        dcc.Store(id="auth-boot", data=True),
     ]),
     html.Div(children=[
             dcc.Tabs([
@@ -300,88 +297,122 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                 ], width=9),
             ]),
         ]),
-         dcc.Tab(label='Case Management', children=[
-            html.H3(children='Case Management'),
-            dcc.Dropdown(id="cm-master", options=store.list_master_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
-            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                html.Label('Case Name', htmlFor="cm-case-name"), dcc.Input(id="cm-case-name", type="text", className="form-control"),
-            ]),
-            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                html.Label('Case Number', htmlFor="cm-case-number"), dcc.Input(id="cm-case-number", type="text", className="form-control"),
-            ]),
-            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                html.Label('Jurisdiction', htmlFor="cm-jurisdiction"), dcc.Input(id="cm-jurisdiction", type="text", className="form-control"),
-            ]),
-            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                html.Label('Judge', htmlFor="cm-judge"), dcc.Input(id="cm-judge", type="text", className="form-control"),
-            ]),
-            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                html.Label('Petition Date (YYYY-MM-DD)', htmlFor="cm-petition-date"), dcc.Input(id="cm-petition-date", type="date", className="form-control"),
-            ]),
-            dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
-            html.Div(id="cm-subcase-list", className="mt-3"),
-            html.Div(id="cm-status", className="mt-3"),
-        ]),
-         dcc.Tab(label='Admin', children=[
-            html.H3(children='User Management'),
-            html.Div(className="text-muted mb-3", id="admin-notice"),
-            dag.AgGrid(
-                id="admin-users-grid",
-                dashGridOptions={"rowSelection": "single"},
-                columnDefs=[
-                    {"field": "username", "headerName": "Username"},
-                    {"field": "role", "headerName": "Role"},
-                    {"field": "email", "headerName": "Email"},
-                    {"field": "active", "headerName": "Active"},
-                    {"field": "created_at", "headerName": "Created At"},
-                ],
-            ),
-            html.Hr(),
-            html.H6('Create user'),
-            html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control")]),
-                html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control")]),
-                html.Div(children=[html.Label('Email', htmlFor="new-user-email"), dcc.Input(id="new-user-email", type="email", className="form-control")]),
-                html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "140px"})]),
-                dbc.Button("Create User", id="admin-create-btn", color="primary"),
-            ]),
-            html.Hr(),
-            html.H6('Actions on selected user'),
-            html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                html.Div(children=[html.Label('New role', htmlFor="admin-role-select"), dcc.Dropdown(id="admin-role-select", options=[{"label": r, "value": r} for r in auth.ROLES], style={"minWidth": "140px"})]),
-                html.Div(children=[html.Label('New password (reset)', htmlFor="admin-reset-pw"), dcc.Input(id="admin-reset-pw", type="password", className="form-control")]),
-                dbc.Button("Set Role", id="admin-set-role-btn", color="secondary"),
-                dbc.Button("Reset Password", id="admin-reset-btn", color="secondary"),
-                dbc.Button("Activate/Deactivate", id="admin-toggle-btn", color="secondary"),
-                dbc.Button("Delete User", id="admin-delete-btn", color="danger"),
-            ]),
-            html.Div(id="admin-status", className="mt-3"),
-            html.Hr(),
-            html.H6('Case Access (grants)'),
-            html.P('Grant a user access to a master case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
-            html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
-                html.Div(children=[html.Label('Master case', htmlFor="grant-master"), dcc.Dropdown(id="grant-master", options=store.list_master_options(), style={"minWidth": "260px"})]),
-                html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
-                dbc.Button("Grant Master", id="grant-master-btn", color="secondary"),
-                dbc.Button("Revoke Master", id="revoke-master-btn", color="secondary"),
-                dbc.Button("Grant Subcase", id="grant-subcase-btn", color="secondary"),
-                dbc.Button("Revoke Subcase", id="revoke-subcase-btn", color="danger"),
-            ]),
-            html.Div(id="grant-status", className="mt-2"),
-            dag.AgGrid(
-                id="grants-grid",
-                columnDefs=[
-                    {"field": "username", "headerName": "User"},
-                    {"field": "level", "headerName": "Level"},
-                    {"field": "master_case_id", "headerName": "Master ID"},
-                    {"field": "subcase_id", "headerName": "Subcase ID"},
-                ],
-            ),
-        ])
-     ])
+])
     ])
 ])
+
+
+def _manage_page():
+    return html.Div(style={"padding": "20px"}, children=[
+        html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "16px"}, children=[
+            dcc.Link("← Back to Analysis", href="/", style={"textDecoration": "none"}),
+            html.H3(children="Management Console", style={"margin": 0}),
+            html.Span(),
+        ]),
+        dcc.Store(id="manage-boot", data=True),
+        html.Hr(),
+        dcc.Tabs([
+            dcc.Tab(label='Case Management', children=[
+                html.H3(children='Case Management'),
+                dcc.Dropdown(id="cm-master", options=store.list_master_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+                html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                    html.Label('Case Name', htmlFor="cm-case-name"), dcc.Input(id="cm-case-name", type="text", className="form-control"),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                    html.Label('Case Number', htmlFor="cm-case-number"), dcc.Input(id="cm-case-number", type="text", className="form-control"),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                    html.Label('Jurisdiction', htmlFor="cm-jurisdiction"), dcc.Input(id="cm-jurisdiction", type="text", className="form-control"),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                    html.Label('Judge', htmlFor="cm-judge"), dcc.Input(id="cm-judge", type="text", className="form-control"),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                    html.Label('Petition Date (YYYY-MM-DD)', htmlFor="cm-petition-date"), dcc.Input(id="cm-petition-date", type="date", className="form-control"),
+                ]),
+                dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(id="cm-subcase-list", className="mt-3"),
+                html.Div(id="cm-status", className="mt-3"),
+            ]),
+            dcc.Tab(id="admin-tab", label='Admin', children=[
+                html.H3(children='User Management'),
+                html.Div(className="text-muted mb-3", id="admin-notice"),
+                dag.AgGrid(
+                    id="admin-users-grid",
+                    dashGridOptions={"rowSelection": "single"},
+                    columnDefs=[
+                        {"field": "username", "headerName": "Username"},
+                        {"field": "role", "headerName": "Role"},
+                        {"field": "email", "headerName": "Email"},
+                        {"field": "active", "headerName": "Active"},
+                        {"field": "created_at", "headerName": "Created At"},
+                    ],
+                ),
+                html.Hr(),
+                html.H6('Create user'),
+                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                    html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control")]),
+                    html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control")]),
+                    html.Div(children=[html.Label('Email', htmlFor="new-user-email"), dcc.Input(id="new-user-email", type="email", className="form-control")]),
+                    html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "140px"})]),
+                    dbc.Button("Create User", id="admin-create-btn", color="primary"),
+                ]),
+                html.Hr(),
+                html.H6('Actions on selected user'),
+                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                    html.Div(children=[html.Label('New role', htmlFor="admin-role-select"), dcc.Dropdown(id="admin-role-select", options=[{"label": r, "value": r} for r in auth.ROLES], style={"minWidth": "140px"})]),
+                    html.Div(children=[html.Label('New password (reset)', htmlFor="admin-reset-pw"), dcc.Input(id="admin-reset-pw", type="password", className="form-control")]),
+                    dbc.Button("Set Role", id="admin-set-role-btn", color="secondary"),
+                    dbc.Button("Reset Password", id="admin-reset-btn", color="secondary"),
+                    dbc.Button("Activate/Deactivate", id="admin-toggle-btn", color="secondary"),
+                    dbc.Button("Delete User", id="admin-delete-btn", color="danger"),
+                ]),
+                html.Div(id="admin-status", className="mt-3"),
+                html.Hr(),
+                html.H6('Case Access (grants)'),
+                html.P('Grant a user access to a master case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
+                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                    html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
+                    html.Div(children=[html.Label('Master case', htmlFor="grant-master"), dcc.Dropdown(id="grant-master", options=store.list_master_options(), style={"minWidth": "260px"})]),
+                    html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
+                    dbc.Button("Grant Master", id="grant-master-btn", color="secondary"),
+                    dbc.Button("Revoke Master", id="revoke-master-btn", color="secondary"),
+                    dbc.Button("Grant Subcase", id="grant-subcase-btn", color="secondary"),
+                    dbc.Button("Revoke Subcase", id="revoke-subcase-btn", color="danger"),
+                ]),
+                html.Div(id="grant-status", className="mt-2"),
+                dag.AgGrid(
+                    id="grants-grid",
+                    columnDefs=[
+                        {"field": "username", "headerName": "User"},
+                        {"field": "level", "headerName": "Level"},
+                        {"field": "master_case_id", "headerName": "Master ID"},
+                        {"field": "subcase_id", "headerName": "Subcase ID"},
+                    ],
+                ),
+            ]),
+        ]),
+    ])
+
+
+def _shell():
+    return html.Div(style={"padding": "20px"}, children=[
+        html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "flexWrap": "wrap", "padding": "12px 16px", "borderRadius": "0.375rem", "marginBottom": "20px", "border": "1px solid var(--bs-border-color)", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
+            html.H1(children='Preference Analysis Tool', style={"margin": 0}),
+            html.Div(style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"}, children=[
+                dcc.Store(id="shell-boot", data=True),
+                html.Div(id="user-badge", className="text-muted"),
+                html.Form(children=[dbc.Button("Log out", type="submit", color="secondary", size="sm")], action="/logout", method="POST"),
+            ]),
+        ]),
+        dash.page_container,
+    ])
+
+
+dash.register_page("analysis", path="/", layout=_analysis_page(), title="Preference Analysis Tool", name="Analysis")
+dash.register_page("management", path="/manage", layout=_manage_page(), title="Management Console", name="Management Console")
+
+app.layout = _shell()
 
 @callback(
     Output("new_value", "rowData", allow_duplicate=True),
@@ -391,7 +422,9 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
     prevent_initial_call=True
 )
 def update_new_value(cellChange, ordinary_invoices, rowData):
-    df = pd.DataFrame(rowData)
+    df = pd.DataFrame(rowData or [])
+    if df.empty:
+        return []
     trig = dash.callback_context.triggered_id
     if trig in ("ocb-ordinary-invoices", None):
         df = analysis.sync_new_value(df, ordinary_invoices)
@@ -404,8 +437,8 @@ def update_new_value(cellChange, ordinary_invoices, rowData):
     prevent_initial_call=True
 )
 def update_nv_totals(rowData):
-    df = pd.DataFrame(rowData)
-    total = df["Net Preference"].iloc[-1]
+    df = pd.DataFrame(rowData or [])
+    total = df["Net Preference"].iloc[-1] if not df.empty else 0.0
     return f"Net Preference Total: ${total:,.2f}"
 
 def _ocb_transfer_shares(st):
@@ -430,10 +463,12 @@ def _ocb_transfer_shares(st):
 )
 def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     st = session.get_state()
-    df_nv = pd.DataFrame(nv_rowData)
+    if st.df_transfers is None or st.df_historical is None or st.df_preference is None:
+        return dash.no_update
+    df_nv = pd.DataFrame(nv_rowData or [])
+    total_new_value = df_nv["Allowed New Value"].sum() if not df_nv.empty else 0.0
+    net_new_value = df_nv["Net Preference"].iloc[-1] if not df_nv.empty else 0.0
     total_transfers = st.df_transfers["Transfer Amount"].sum()
-    total_new_value = df_nv["Allowed New Value"].sum()
-    net_new_value = df_nv["Net Preference"].iloc[-1]
     hist_wavg = analysis.calc_weighted_dso(st.df_historical)
     pref_wavg = analysis.calc_weighted_dso(st.df_preference)
     diff = (pref_wavg - hist_wavg) / hist_wavg * 100
@@ -732,11 +767,25 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
 
 @callback(
     Output("user-badge", "children"),
-    Input("auth-boot", "data")
+    Input("shell-boot", "data")
 )
 def update_user_badge(_):
     u = auth.current_user
-    return f"{u.role.title()} — {u.username}"
+    label = f"{u.role.title()} — {u.username}"
+    if u.role in ("admin", "case_manager"):
+        return dcc.Link(label, href="/manage",
+                        style={"color": "var(--bs-link-color)", "textDecoration": "none", "fontWeight": "600"})
+    return label
+
+
+@callback(
+    Output("admin-tab", "style"),
+    Input("manage-boot", "data"),
+)
+def manage_page_gate(_):
+    if auth.current_user.role == "admin":
+        return dash.no_update
+    return {"display": "none"}
 
 
 @callback(
@@ -744,7 +793,7 @@ def update_user_badge(_):
     Output("admin-notice", "children"),
     Output("grants-grid", "rowData", allow_duplicate=True),
     Output("grant-user", "options"),
-    Input("auth-boot", "data"),
+    Input("manage-boot", "data"),
     prevent_initial_call='initial_duplicate'
 )
 def admin_load(_):
