@@ -145,7 +145,8 @@ def list_subcase_options(master_id=None):
 def get_master_by_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute('''
-        SELECT m.id, m.case_name, m.case_number, m.jurisdiction, m.judge, m.petition_date
+        SELECT m.id, m.case_name, m.case_number, m.jurisdiction, m.judge, m.petition_date,
+               s.transferee_name, s.adversary_number
         FROM subcases s JOIN master_cases m ON m.id = s.master_case_id
         WHERE s.id = ?
     ''', (int(subcase_id),)).fetchone()
@@ -159,6 +160,8 @@ def get_master_by_subcase(subcase_id):
         'jurisdiction': row[3],
         'judge': row[4],
         'petition_date': row[5],
+        'transferee': row[6],
+        'adversary_number': row[7],
     }
 
 

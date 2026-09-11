@@ -249,6 +249,8 @@ def load_case(subcase_id):
         'judge': master['judge'],
         'petition_date': petition_date.strftime('%m/%d/%Y'),
         'pref_start': pref_start.strftime('%m/%d/%Y'),
+        'transferee': master['transferee'],
+        'adversary_number': master['adversary_number'] or '',
         'hist_title': f'Historical Period: {hist_dates.min().strftime("%m/%d/%Y")} through {hist_dates.max().strftime("%m/%d/%Y")}',
         'pref_title': f'Preference Period: {s} through {p}',
         'hist_count': f'Historical Period Invoice Count: {len(hist_dates)}',
@@ -271,46 +273,42 @@ app.title  = "Preference Analysis Tool"
 
 app.layout = html.Div(style={"padding": "20px"}, children=[
     html.H1(children='Preference Analysis Tool'),
-    html.Div(style={"marginBottom": "20px"}, children=[
-        dbc.Card([
-            dbc.CardHeader(className="d-flex justify-content-between align-items-center", children=[
-                html.Strong('Case Selection'),
-                dbc.Button(
-                    html.I(id="sidebar-toggle-icon", className="fa-solid fa-chevron-up"),
-                    id="sidebar-toggle",
-                    color="link",
+    html.Div(style={
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center",
+        "gap": "20px",
+        "flexWrap": "wrap",
+        "padding": "12px 16px",
+        "borderRadius": "0.375rem",
+        "marginBottom": "20px",
+        "border": "1px solid var(--bs-border-color)",
+        "backgroundColor": "var(--bs-tertiary-bg)",
+    }, children=[
+        html.Div(id="master-info", children=[
+            html.Div(f"Transferee: {_init_case['transferee']}   |   Adversary Number: {_init_case['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+            html.Div(f"Main Case: {_init_case['master_name']}   |   Preference Period: {_init_case['pref_start']} - {_init_case['petition_date']}"),
+        ]),
+        html.Div(style={"display": "flex", "gap": "16px", "alignItems": "flex-end", "flexWrap": "wrap"}, children=[
+            html.Div(children=[
+                html.Label('Master Bankruptcy Case', htmlFor="master-selector"),
+                dcc.Dropdown(
+                    id="master-selector",
+                    options=store.list_master_options(),
+                    value=_init_case['master_id'],
+                    clearable=False,
+                    style={"width": "300px"},
                 ),
             ]),
-            dbc.Collapse(id="sidebar-collapse", is_open=True, children=[
-                dbc.CardBody(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "gap": "20px", "flexWrap": "wrap"}, children=[
-                    html.Div(id="master-info", children=[
-                        html.Div(f"Case Name: {_init_case['master_name']}   |   Case Number: {_init_case['master_number']}"),
-                        html.Div(f"Jurisdiction: {_init_case['jurisdiction']}   |   Judge: {_init_case['judge']}"),
-                        html.Div(f"Petition Date: {_init_case['petition_date']}   |   Preference Start Date: {_init_case['pref_start']}"),
-                    ]),
-                    html.Div(style={"display": "flex", "gap": "16px", "alignItems": "flex-end", "flexWrap": "wrap"}, children=[
-                        html.Div(children=[
-                            html.Label('Master Bankruptcy Case', htmlFor="master-selector"),
-                            dcc.Dropdown(
-                                id="master-selector",
-                                options=store.list_master_options(),
-                                value=_init_case['master_id'],
-                                clearable=False,
-                                style={"width": "300px"},
-                            ),
-                        ]),
-                        html.Div(children=[
-                            html.Label('Subcase', htmlFor="subcase-selector"),
-                            dcc.Dropdown(
-                                id="subcase-selector",
-                                options=store.list_subcase_options(_init_case['master_id']),
-                                value=_init_case['subcase_id'],
-                                clearable=False,
-                                style={"width": "300px"},
-                            ),
-                        ]),
-                    ]),
-                ]),
+            html.Div(children=[
+                html.Label('Subcase', htmlFor="subcase-selector"),
+                dcc.Dropdown(
+                    id="subcase-selector",
+                    options=store.list_subcase_options(_init_case['master_id']),
+                    value=_init_case['subcase_id'],
+                    clearable=False,
+                    style={"width": "300px"},
+                ),
             ]),
         ]),
     ]),
@@ -333,6 +331,8 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             dag.AgGrid(
                 id="historical",
                 rowData=df_historical.to_dict('records'),
+                getRowStyle=ocb_default_style(),
+                style={"height": "600px"},
                 columnDefs=[
                     {"field": "Transfer Number"},
                     {"field": "Transfer Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
@@ -358,6 +358,8 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             dag.AgGrid(
               id="preference",
               rowData=df_preference.to_dict('records'),
+              getRowStyle=ocb_default_style(),
+              style={"height": "600px"},
               columnDefs=[
                 {"field": "Transfer Number"},
                 {"field": "Transfer Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
@@ -383,6 +385,8 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
             dag.AgGrid(
                 id="new_value",
                 rowData=df_snv.to_dict('records'),
+                getRowStyle=ocb_default_style(),
+                style={"height": "600px"},
                 columnDefs=[
                     {"field": "Transaction Date"},
                     {"field": "Transfer Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
@@ -624,9 +628,8 @@ def selection_changed(master_id, subcase_id):
     info = load_case(subcase_id)
     store.save_app_state(subcase_id)
     master_info = [
-        html.Div(f"Case Name: {info['master_name']}   |   Case Number: {info['master_number']}"),
-        html.Div(f"Jurisdiction: {info['jurisdiction']}   |   Judge: {info['judge']}"),
-        html.Div(f"Petition Date: {info['petition_date']}   |   Preference Start Date: {info['pref_start']}"),
+        html.Div(f"Transferee: {info['transferee']}   |   Adversary Number: {info['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+        html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
     ]
     return (
         no_update,
@@ -643,16 +646,6 @@ def selection_changed(master_id, subcase_id):
         {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
          'step': info['ocb_step'], 'total': info['ocb_total_flag']},
     )
-
-@callback(
-    Output("sidebar-collapse", "is_open"),
-    Output("sidebar-toggle-icon", "className"),
-    Input("sidebar-toggle", "n_clicks"),
-    State("sidebar-collapse", "is_open"),
-    prevent_initial_call=True
-)
-def toggle_sidebar(n_clicks, is_open):
-    return (not is_open), ("fa-solid fa-chevron-down" if is_open else "fa-solid fa-chevron-up")
 
 @callback(
     Output("ocb_grid", "getRowStyle"),
