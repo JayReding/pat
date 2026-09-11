@@ -519,6 +519,7 @@ def apply_ocb_range(sel, start, end, step):
         mask &= days >= lower
     if upper is not None:
         mask &= days <= upper
+    STATE.df_preference["Ordinary"] = 0
     STATE.df_preference.loc[mask, "Ordinary"] = 1
     status = f"OCB range: {s_label} to {e_label} — {int(mask.sum())} preference invoice(s) marked as Ordinary."
     hist_days = STATE.df_historical["Invoice to Payment"]
