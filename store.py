@@ -1,10 +1,12 @@
 import sqlite3
 import json
+from datetime import datetime, timezone
 
 import pandas as pd
 
 CASES_DB = 'pat_cases.db'
 STATE_DB = 'pat_state.db'
+USERS_DB = 'pat_users.db'
 
 
 def _connect_cases():
@@ -241,3 +243,231 @@ def set_subcase_meta(key, value, subcase_id):
     conn.execute("UPDATE subcases SET meta = ? WHERE id = ?", (json.dumps(meta), int(subcase_id)))
     conn.commit()
     conn.close()
+
+
+def _connect_users():
+    conn = sqlite3.connect(USERS_DB)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_users_db():
+    conn = _connect_users()
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY,
+            username      TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role          TEXT NOT NULL,
+            email         TEXT,
+            active        INTEGER NOT NULL DEFAULT 1,
+            created_at    TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS master_grants (
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            master_case_id  INTEGER NOT NULL,
+            PRIMARY KEY (user_id, master_case_id)
+        );
+        CREATE TABLE IF NOT EXISTS subcase_grants (
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            subcase_id INTEGER NOT NULL,
+            PRIMARY KEY (user_id, subcase_id)
+        );
+    ''')
+    conn.commit()
+    return conn
+
+
+def _row_to_dict(columns, row):
+    return dict(zip(columns, row)) if row else None
+
+
+def get_user_by_username(username):
+    conn = _connect_users()
+    cur = conn.execute("SELECT * FROM users WHERE username = ?", (username,))
+    columns = [d[0] for d in cur.description]
+    row = cur.fetchone()
+    conn.close()
+    return _row_to_dict(columns, row)
+
+
+def get_user_by_id(user_id):
+    conn = _connect_users()
+    cur = conn.execute("SELECT * FROM users WHERE id = ?", (int(user_id),))
+    columns = [d[0] for d in cur.description]
+    row = cur.fetchone()
+    conn.close()
+    return _row_to_dict(columns, row)
+
+
+def create_user(username, password_hash, role='user', email=None):
+    conn = _connect_users()
+    conn.execute(
+        "INSERT INTO users (username, password_hash, role, email, active, created_at) "
+        "VALUES (?, ?, ?, ?, 1, ?)",
+        (username, password_hash, role, email, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_users():
+    conn = _connect_users()
+    rows = conn.execute(
+        "SELECT id, username, role, email, active, created_at FROM users ORDER BY username"
+    ).fetchall()
+    conn.close()
+    return [dict(zip(("id", "username", "role", "email", "active", "created_at"), r)) for r in rows]
+
+
+def set_user_role(user_id, role):
+    conn = _connect_users()
+    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, int(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def set_user_active(user_id, active):
+    conn = _connect_users()
+    conn.execute("UPDATE users SET active = ? WHERE id = ?", (int(bool(active)), int(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def reset_user_password(user_id, password_hash):
+    conn = _connect_users()
+    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, int(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def delete_user(user_id):
+    conn = _connect_users()
+    conn.execute("DELETE FROM master_grants WHERE user_id = ?", (int(user_id),))
+    conn.execute("DELETE FROM subcase_grants WHERE user_id = ?", (int(user_id),))
+    conn.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
+    conn.commit()
+    conn.close()
+
+
+def get_master_by_id(master_id):
+    conn = _connect_cases()
+    row = conn.execute(
+        "SELECT id, case_name, case_number, jurisdiction, judge, petition_date, created_at "
+        "FROM master_cases WHERE id = ?", (int(master_id),)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise ValueError(f"No master case with id {master_id}")
+    return {
+        'id': row[0],
+        'case_name': row[1],
+        'case_number': row[2],
+        'jurisdiction': row[3],
+        'judge': row[4],
+        'petition_date': row[5],
+        'created_at': row[6],
+    }
+
+
+def update_master_case(master_id, case_name, case_number, jurisdiction, judge, petition_date):
+    from datetime import datetime
+    name = (case_name or '').strip()
+    number = (case_number or '').strip()
+    petition = (petition_date or '').strip()
+    if not name or not number or not petition:
+        raise ValueError('case_name, case_number, and petition_date are required.')
+    try:
+        datetime.strptime(petition, '%Y-%m-%d')
+    except ValueError:
+        raise ValueError('petition_date must be YYYY-MM-DD.')
+    judge = (judge or '').strip() or None
+    jurisdiction = (jurisdiction or '').strip() or None
+    conn = _connect_cases()
+    try:
+        conn.execute(
+            "UPDATE master_cases SET case_name=?, case_number=?, jurisdiction=?, judge=?, petition_date=? "
+            "WHERE id=?",
+            (name, number, jurisdiction, judge, petition, int(master_id)),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A master case named '{name}' already exists.")
+    finally:
+        conn.close()
+
+
+def grant_master(user_id, master_case_id):
+    conn = _connect_users()
+    conn.execute(
+        "INSERT OR IGNORE INTO master_grants (user_id, master_case_id) VALUES (?, ?)",
+        (int(user_id), int(master_case_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def revoke_master(user_id, master_case_id):
+    conn = _connect_users()
+    conn.execute(
+        "DELETE FROM master_grants WHERE user_id = ? AND master_case_id = ?",
+        (int(user_id), int(master_case_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def grant_subcase(user_id, subcase_id):
+    conn = _connect_users()
+    conn.execute(
+        "INSERT OR IGNORE INTO subcase_grants (user_id, subcase_id) VALUES (?, ?)",
+        (int(user_id), int(subcase_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def revoke_subcase(user_id, subcase_id):
+    conn = _connect_users()
+    conn.execute(
+        "DELETE FROM subcase_grants WHERE user_id = ? AND subcase_id = ?",
+        (int(user_id), int(subcase_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def master_grants_for(user_id):
+    conn = _connect_users()
+    rows = conn.execute(
+        "SELECT master_case_id FROM master_grants WHERE user_id = ?", (int(user_id),)
+    ).fetchall()
+    conn.close()
+    return [{'master_case_id': r[0]} for r in rows]
+
+
+def subcase_grants_for(user_id):
+    conn = _connect_users()
+    rows = conn.execute(
+        "SELECT subcase_id FROM subcase_grants WHERE user_id = ?", (int(user_id),)
+    ).fetchall()
+    conn.close()
+    return [{'subcase_id': r[0]} for r in rows]
+
+
+def list_all_grants():
+    conn = _connect_users()
+    rows = conn.execute(
+        'SELECT * FROM ('
+        'SELECT mg.user_id, u.username, mg.master_case_id, NULL AS subcase_id, "master" AS level '
+        'FROM master_grants mg JOIN users u ON u.id = mg.user_id '
+        'UNION ALL '
+        'SELECT sg.user_id, u.username, NULL, sg.subcase_id, "subcase" AS level '
+        'FROM subcase_grants sg JOIN users u ON u.id = sg.user_id'
+        ') ORDER BY username, level, COALESCE(master_case_id, subcase_id)'
+    ).fetchall()
+    conn.close()
+    return [
+        {'user_id': r[0], 'username': r[1], 'master_case_id': r[2], 'subcase_id': r[3], 'level': r[4]}
+        for r in rows
+    ]

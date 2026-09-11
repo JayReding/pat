@@ -1,4 +1,5 @@
 # Import packages
+import os
 from dash import Dash, html, dcc, callback, Output, Input, State
 from dash.exceptions import PreventUpdate
 import dash
@@ -10,10 +11,12 @@ import numpy as np
 import analysis
 import state
 import store
+import auth
 
 # Incorporate data
 store.init_cases_db()
 store.init_state_db()
+store.init_users_db()
 
 # Explicit per-case state (previously implicit module globals)
 STATE = state.CaseState()
@@ -147,6 +150,11 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                     style={"width": "300px"},
                 ),
             ]),
+        ]),
+        html.Div(style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"}, children=[
+            dcc.Store(id="auth-boot", data=True),
+            html.Div(id="user-badge", className="text-muted"),
+            html.Form(children=[dbc.Button("Log out", type="submit", color="secondary", size="sm")], action="/logout", method="POST"),
         ]),
     ]),
     html.Div(children=[
@@ -290,6 +298,85 @@ app.layout = html.Div(style={"padding": "20px"}, children=[
                     ),
                 ], width=9),
             ]),
+        ]),
+         dcc.Tab(label='Case Management', children=[
+            html.H3(children='Case Management'),
+            dcc.Dropdown(id="cm-master", options=store.list_master_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                html.Label('Case Name', htmlFor="cm-case-name"), dcc.Input(id="cm-case-name", type="text", className="form-control"),
+            ]),
+            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                html.Label('Case Number', htmlFor="cm-case-number"), dcc.Input(id="cm-case-number", type="text", className="form-control"),
+            ]),
+            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                html.Label('Jurisdiction', htmlFor="cm-jurisdiction"), dcc.Input(id="cm-jurisdiction", type="text", className="form-control"),
+            ]),
+            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                html.Label('Judge', htmlFor="cm-judge"), dcc.Input(id="cm-judge", type="text", className="form-control"),
+            ]),
+            html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+                html.Label('Petition Date (YYYY-MM-DD)', htmlFor="cm-petition-date"), dcc.Input(id="cm-petition-date", type="date", className="form-control"),
+            ]),
+            dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
+            html.Div(id="cm-subcase-list", className="mt-3"),
+            html.Div(id="cm-status", className="mt-3"),
+        ]),
+         dcc.Tab(label='Admin', children=[
+            html.H3(children='User Management'),
+            html.Div(className="text-muted mb-3", id="admin-notice"),
+            dag.AgGrid(
+                id="admin-users-grid",
+                dashGridOptions={"rowSelection": "single"},
+                columnDefs=[
+                    {"field": "username", "headerName": "Username"},
+                    {"field": "role", "headerName": "Role"},
+                    {"field": "email", "headerName": "Email"},
+                    {"field": "active", "headerName": "Active"},
+                    {"field": "created_at", "headerName": "Created At"},
+                ],
+            ),
+            html.Hr(),
+            html.H6('Create user'),
+            html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control")]),
+                html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control")]),
+                html.Div(children=[html.Label('Email', htmlFor="new-user-email"), dcc.Input(id="new-user-email", type="email", className="form-control")]),
+                html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "140px"})]),
+                dbc.Button("Create User", id="admin-create-btn", color="primary"),
+            ]),
+            html.Hr(),
+            html.H6('Actions on selected user'),
+            html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                html.Div(children=[html.Label('New role', htmlFor="admin-role-select"), dcc.Dropdown(id="admin-role-select", options=[{"label": r, "value": r} for r in auth.ROLES], style={"minWidth": "140px"})]),
+                html.Div(children=[html.Label('New password (reset)', htmlFor="admin-reset-pw"), dcc.Input(id="admin-reset-pw", type="password", className="form-control")]),
+                dbc.Button("Set Role", id="admin-set-role-btn", color="secondary"),
+                dbc.Button("Reset Password", id="admin-reset-btn", color="secondary"),
+                dbc.Button("Activate/Deactivate", id="admin-toggle-btn", color="secondary"),
+                dbc.Button("Delete User", id="admin-delete-btn", color="danger"),
+            ]),
+            html.Div(id="admin-status", className="mt-3"),
+            html.Hr(),
+            html.H6('Case Access (grants)'),
+            html.P('Grant a user access to a master case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
+            html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
+                html.Div(children=[html.Label('Master case', htmlFor="grant-master"), dcc.Dropdown(id="grant-master", options=store.list_master_options(), style={"minWidth": "260px"})]),
+                html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
+                dbc.Button("Grant Master", id="grant-master-btn", color="secondary"),
+                dbc.Button("Revoke Master", id="revoke-master-btn", color="secondary"),
+                dbc.Button("Grant Subcase", id="grant-subcase-btn", color="secondary"),
+                dbc.Button("Revoke Subcase", id="revoke-subcase-btn", color="danger"),
+            ]),
+            html.Div(id="grant-status", className="mt-2"),
+            dag.AgGrid(
+                id="grants-grid",
+                columnDefs=[
+                    {"field": "username", "headerName": "User"},
+                    {"field": "level", "headerName": "Level"},
+                    {"field": "master_case_id", "headerName": "Master ID"},
+                    {"field": "subcase_id", "headerName": "Subcase ID"},
+                ],
+            ),
         ])
      ])
     ])
@@ -613,6 +700,7 @@ def update_pref_totals(rowData):
     prevent_initial_call=True
 )
 def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_rowData):
+    auth.guard_edit_subcase(STATE.active_subcase_id)
     from datetime import datetime
     nv_settings = []
     for row in nv_rowData:
@@ -630,6 +718,200 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
     return f"Saved {datetime.now().strftime('%H:%M:%S')}"
 
 
+@callback(
+    Output("user-badge", "children"),
+    Input("auth-boot", "data")
+)
+def update_user_badge(_):
+    u = auth.current_user
+    return f"{u.role.title()} — {u.username}"
+
+
+@callback(
+    Output("admin-users-grid", "rowData", allow_duplicate=True),
+    Output("admin-notice", "children"),
+    Output("grants-grid", "rowData", allow_duplicate=True),
+    Output("grant-user", "options"),
+    Input("auth-boot", "data"),
+    prevent_initial_call='initial_duplicate'
+)
+def admin_load(_):
+    auth.guard("admin")
+    user_map = [{"label": u["username"], "value": u["id"]} for u in store.list_users()]
+    return store.list_users(), f"Managing users as {auth.current_user.username}.", store.list_all_grants(), user_map
+
+
+@callback(
+    Output("admin-users-grid", "rowData"),
+    Output("admin-status", "children"),
+    Input("admin-create-btn", "n_clicks"),
+    Input("admin-set-role-btn", "n_clicks"),
+    Input("admin-reset-btn", "n_clicks"),
+    Input("admin-toggle-btn", "n_clicks"),
+    Input("admin-delete-btn", "n_clicks"),
+    State("new-user-username", "value"),
+    State("new-user-password", "value"),
+    State("new-user-email", "value"),
+    State("new-user-role", "value"),
+    State("admin-role-select", "value"),
+    State("admin-reset-pw", "value"),
+    State("admin-users-grid", "selectedRows"),
+    prevent_initial_call=True
+)
+def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
+                 new_name, new_pw, new_email, new_role, sel_role, reset_pw, selected):
+    auth.guard("admin")
+    from werkzeug.security import generate_password_hash
+    trig = dash.callback_context.triggered_id
+    uid = uname = None
+    if selected:
+        uid, uname = selected[0].get("id"), selected[0].get("username")
+    status = ""
+
+    if trig == "admin-create-btn" and new_name and new_pw:
+        name = new_name.strip()
+        if store.get_user_by_username(name):
+            status = f"Username '{name}' already exists."
+        else:
+            store.create_user(name, generate_password_hash(new_pw), new_role or "user", (new_email or "").strip() or None)
+            status = f"Created user '{name}' ({new_role or 'user'})."
+    elif trig == "admin-create-btn":
+        status = "Enter a username and password to create a user."
+    elif trig == "admin-set-role-btn":
+        if uid is not None and sel_role:
+            store.set_user_role(uid, sel_role)
+            status = f"Role set to '{sel_role}' for '{uname}'."
+        else:
+            status = "Select a user and a role."
+    elif trig == "admin-reset-btn":
+        if uid is not None and reset_pw:
+            store.reset_user_password(uid, generate_password_hash(reset_pw))
+            status = f"Password reset for '{uname}'."
+        else:
+            status = "Select a user and enter a new password."
+    elif trig == "admin-toggle-btn":
+        if uid is not None:
+            state = store.get_user_by_id(uid)
+            new_active = not bool(state['active'])
+            store.set_user_active(uid, new_active)
+            status = f"'{uname}' {'activated' if new_active else 'deactivated'}."
+        else:
+            status = "Select a user."
+    elif trig == "admin-delete-btn":
+        if uid is not None:
+            if str(auth.current_user.id) == str(uid):
+                status = "You cannot delete your own account."
+            else:
+                store.delete_user(uid)
+                status = f"Deleted user '{uname}'."
+        else:
+            status = "Select a user."
+
+    return store.list_users(), status
+
+
+@callback(
+    Output("cm-case-name", "value"),
+    Output("cm-case-number", "value"),
+    Output("cm-jurisdiction", "value"),
+    Output("cm-judge", "value"),
+    Output("cm-petition-date", "value"),
+    Output("cm-case-name", "disabled"),
+    Output("cm-case-number", "disabled"),
+    Output("cm-jurisdiction", "disabled"),
+    Output("cm-judge", "disabled"),
+    Output("cm-petition-date", "disabled"),
+    Output("cm-save", "disabled"),
+    Output("cm-subcase-list", "children"),
+    Input("cm-master", "value"),
+)
+def build_cm_details(master_id):
+    if master_id is None:
+        return (None,) * 5 + (True,) * 6 + (html.P("Select a master case to view or edit its details.", className="text-muted"),)
+    m = store.get_master_by_id(master_id)
+    subs = store.list_subcase_options(master_id)
+    can_edit = auth.can_edit_master(auth.current_user, master_id)
+    sub_list = html.Div(children=[
+        html.Strong(f"Subcases ({len(subs)}):"),
+        html.Ul(children=[html.Li(s["label"]) for s in subs]),
+    ])
+    return (
+        m["case_name"], m["case_number"], m.get("jurisdiction") or "", m.get("judge") or "",
+        m.get("petition_date") or "",
+        not can_edit, not can_edit, not can_edit, not can_edit, not can_edit, not can_edit,
+        sub_list,
+    )
+
+
+@callback(
+    Output("cm-status", "children"),
+    Input("cm-save", "n_clicks"),
+    State("cm-master", "value"),
+    State("cm-case-name", "value"),
+    State("cm-case-number", "value"),
+    State("cm-jurisdiction", "value"),
+    State("cm-judge", "value"),
+    State("cm-petition-date", "value"),
+    prevent_initial_call=True
+)
+def save_master(n_clicks, master_id, name, number, jurisdiction, judge, petition):
+    if master_id is None:
+        return dbc.Alert("Select a master case first.", color="warning")
+    auth.guard_edit_master(master_id)
+    try:
+        store.update_master_case(master_id, name, number, jurisdiction, judge, petition)
+        return dbc.Alert("Saved.", color="success")
+    except ValueError as e:
+        return dbc.Alert(str(e), color="danger")
+
+
+@callback(
+    Output("grant-subcase", "options"),
+    Output("grant-subcase", "value"),
+    Input("grant-master", "value"),
+)
+def grant_subcase_options(master_id):
+    if master_id is None:
+        return [], None
+    return store.list_subcase_options(master_id), None
+
+
+@callback(
+    Output("grants-grid", "rowData"),
+    Output("grant-status", "children"),
+    Input("grant-master-btn", "n_clicks"),
+    Input("revoke-master-btn", "n_clicks"),
+    Input("grant-subcase-btn", "n_clicks"),
+    Input("revoke-subcase-btn", "n_clicks"),
+    State("grant-user", "value"),
+    State("grant-master", "value"),
+    State("grant-subcase", "value"),
+    prevent_initial_call=True
+)
+def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, master_id, subcase_id):
+    auth.guard("admin")
+    trig = dash.callback_context.triggered_id
+    if trig == "grant-master-btn" and user_id is not None and master_id is not None:
+        store.grant_master(user_id, master_id)
+        status = "Granted master access (covers all its subcases)."
+    elif trig == "revoke-master-btn" and user_id is not None and master_id is not None:
+        store.revoke_master(user_id, master_id)
+        status = "Revoked master access."
+    elif trig == "grant-subcase-btn" and user_id is not None and subcase_id is not None:
+        store.grant_subcase(user_id, subcase_id)
+        status = "Granted subcase access."
+    elif trig == "revoke-subcase-btn" and user_id is not None and subcase_id is not None:
+        store.revoke_subcase(user_id, subcase_id)
+        status = "Revoked subcase access."
+    else:
+        status = "Select a user and a target before clicking an action."
+    return store.list_all_grants(), status
+
+
+# Apply login protection to every route (including Dash callbacks)
+auth.init_login(app.server)
+
+
 # Run the app
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.environ.get('PAT_DEBUG') == '1')
