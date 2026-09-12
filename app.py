@@ -89,6 +89,10 @@ def load_case(st, subcase_id):
         'pref_start': pref_start.strftime('%m/%d/%Y'),
         'transferee': master['transferee'],
         'adversary_number': master['adversary_number'] or '',
+        'file_number': master['file_number'] or '',
+        'filing_date': master['filing_date'] or '',
+        'subcase_display': (master['adversary_number'] or '') if master['filing_date'] else (master['file_number'] or ''),
+        'subcase_id_label': 'Adversary Number' if master['filing_date'] else 'File Number',
         'hist_title': f'Historical Period: {hist_dates.min().strftime("%m/%d/%Y")} through {hist_dates.max().strftime("%m/%d/%Y")}',
         'pref_title': f'Preference Period: {s} through {p}',
         'hist_count': f'Historical Period Invoice Count: {len(hist_dates)}',
@@ -112,7 +116,7 @@ session.set_loader(_session_loader)
 
 
 # Initialize the app
-app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.ZEPHYR, dbc.icons.FONT_AWESOME])
+app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.SPACELAB, dbc.icons.FONT_AWESOME])
 app.title = "Preference Analysis Tool"
 
 
@@ -169,13 +173,24 @@ def _analysis_page():
                 dbc.ListGroupItem([html.Strong('Weighted DSO Difference: '), html.Span(id="summary-dso-diff")]),
             ]),
         ]),
-         dcc.Tab(label='Historical Period', children=[
+dcc.Tab(label='Historical Period', children=[
             html.H3(id="hist-period-title", children=""),
+            html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
+            html.Div(style={"flex": "0 0 320px", "padding": "16px", "border": "1px solid var(--bs-border-color)",
+                            "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
+               html.Div(id="hist-period-invoice-count", children=""),
+               html.Div(id="hist-total-output"),
+               html.Div(id="hist-average_dso"),
+               html.Div(id="hist-average_dpd"),
+               html.Div(id="hist-weighted_dso"),
+               html.Div(id="hist-weighted_dpd"),
+               html.Div(id="hist-skew")
+            ]),
             dag.AgGrid(
                 id="historical",
                 rowData=[],
                 getRowStyle=analysis.ocb_default_style(),
-                style={"height": "600px"},
+                style={"flex": "1 1 0", "minWidth": "0", "height": "600px"},
                 columnDefs=[
                     {"field": "Transfer Number"},
                     {"field": "Transfer Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
@@ -187,22 +202,27 @@ def _analysis_page():
                     {"field": "Days Past Due"},
                 ]
             ),
-            html.Div(id="hist-period-invoice-count", children=""),
-            html.Div(id="hist-total-output"),
-            html.Div(id="hist-average_dso"),
-            html.Div(id="hist-average_dpd"),
-            html.Div(id="hist-weighted_dso"),
-            html.Div(id="hist-weighted_dpd"),
-            html.Div(id="hist-skew")
+            ])
     ]),
 
-        dcc.Tab(label='Preference Period', children=[
+         dcc.Tab(label='Preference Period', children=[
             html.H3(id="pref-period-title", children=""),
+            html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
+            html.Div(style={"flex": "0 0 320px", "padding": "16px", "border": "1px solid var(--bs-border-color)",
+                            "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
+               html.Div(id="pref-period-invoice-count", children=""),
+               html.Div(id="pref-total-output"),
+               html.Div(id="pref-average_dso"),
+               html.Div(id="pref-average_dpd"),
+               html.Div(id="pref-weighted_dso"),
+               html.Div(id="pref-weighted_dpd"),
+               html.Div(id="diff-wavg", style={"font-weight": "bold"})
+            ]),
             dag.AgGrid(
               id="preference",
               rowData=[],
               getRowStyle=analysis.ocb_default_style(),
-              style={"height": "600px"},
+              style={"flex": "1 1 0", "minWidth": "0", "height": "600px"},
               columnDefs=[
                 {"field": "Transfer Number"},
                 {"field": "Transfer Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
@@ -214,17 +234,9 @@ def _analysis_page():
                 {"field": "Days Past Due"},
             ]
         ),
-        html.Div(id="pref-period-invoice-count", children=""),
-        html.Div(id="pref-total-output"),
-        html.Div(id="pref-average_dso"),
-        html.Div(id="pref-average_dpd"),
-        html.Div(id="pref-weighted_dso"),
-        html.Div(id="pref-weighted_dpd"),
-        html.Div(id="diff-wavg", style={"font-weight": "bold"})
+        ])
     ]),
          dcc.Tab(label='New Value', children=[
-            html.H3(children='New Value Tab'),
-            html.P(children='This is the content for the New Value tab.'),
             dag.AgGrid(
                 id="new_value",
                 rowData=[],
@@ -243,7 +255,6 @@ def _analysis_page():
                     {"headerName": "Exclusion Reason", "field": "Ordinary Exclusion", "editable": False}
                 ]
             ),
-            html.Div(id="nv-net-preference-total"),
         ]),
          dcc.Tab(id="ocb", label='Ordinary Course', children=[
             html.H3(children='Ordinary Course'),
@@ -302,6 +313,13 @@ def _analysis_page():
 ])
 
 
+def _cm_field(label, cid, ftype="text"):
+    return html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
+        html.Label(label, htmlFor=cid),
+        dcc.Input(id=cid, type=ftype, className="form-control"),
+    ])
+
+
 def _manage_page():
     return html.Div(style={"padding": "20px"}, children=[
         html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "16px"}, children=[
@@ -332,6 +350,36 @@ def _manage_page():
                 ]),
                 dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
                 html.Div(id="cm-subcase-list", className="mt-3"),
+                html.Hr(),
+                html.H5('Subcase Details'),
+                dcc.Dropdown(id="cm-subcase", options=[], clearable=False, style={"maxWidth": "420px", "marginBottom": "16px"}),
+                _cm_field('File Number (blank = auto-assign)', "cm-file-number"),
+                _cm_field('Filing Date (YYYY-MM-DD)', "cm-filing-date", "date"),
+                html.H6('Contact', className="mt-3"),
+                _cm_field('Contact Name', "cm-contact-name"),
+                _cm_field('Contact Address', "cm-contact-address"),
+                _cm_field('Contact Address 2', "cm-contact-address2"),
+                html.Div(className="d-flex flex-wrap gap-2", children=[
+                    _cm_field('City', "cm-contact-city"),
+                    _cm_field('State', "cm-contact-state"),
+                    _cm_field('ZIP', "cm-contact-zip"),
+                ]),
+                _cm_field('Contact Phone', "cm-contact-phone"),
+                _cm_field('Contact Email', "cm-contact-email", "email"),
+                html.H6('Attorney', className="mt-3"),
+                _cm_field('Attorney Name', "cm-attorney-name"),
+                _cm_field('Attorney Firm', "cm-attorney-firm"),
+                _cm_field('Attorney Address', "cm-attorney-address"),
+                _cm_field('Attorney Address 2', "cm-attorney-address2"),
+                html.Div(className="d-flex flex-wrap gap-2", children=[
+                    _cm_field('City', "cm-attorney-city"),
+                    _cm_field('State', "cm-attorney-state"),
+                    _cm_field('ZIP', "cm-attorney-zip"),
+                ]),
+                _cm_field('Attorney Phone', "cm-attorney-phone"),
+                _cm_field('Attorney Email', "cm-attorney-email", "email"),
+                dbc.Button("Save Subcase", id="cm-save-subcase", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(id="cm-subcase-status", className="mt-3"),
                 html.Div(id="cm-status", className="mt-3"),
             ]),
             dcc.Tab(id="admin-tab", label='Admin', children=[
@@ -396,16 +444,26 @@ def _manage_page():
 
 
 def _shell():
-    return html.Div(style={"padding": "20px"}, children=[
-        html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "flexWrap": "wrap", "padding": "12px 16px", "borderRadius": "0.375rem", "marginBottom": "20px", "border": "1px solid var(--bs-border-color)", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
-            html.H1(children='Preference Analysis Tool', style={"margin": 0}),
-            html.Div(style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"}, children=[
-                dcc.Store(id="shell-boot", data=True),
-                html.Div(id="user-badge", className="text-muted"),
-                html.Form(children=[dbc.Button("Log out", type="submit", color="secondary", size="sm")], action="/logout", method="POST"),
-            ]),
-        ]),
-        dash.page_container,
+    return html.Div(children=[
+        dbc.Navbar(
+            dbc.Container(
+                [
+                    dbc.NavbarBrand(
+                        [html.I(className="fa-solid fa-chart-column me-2"), "Preference Analysis Tool"],
+                        href="/", className="fw-semibold",
+                    ),
+                    html.Div(className="ms-auto d-flex align-items-center gap-3", children=[
+                        dcc.Store(id="shell-boot", data=True),
+                        html.Div(id="user-badge", className="navbar-text text-white-50"),
+                        html.Form(dbc.Button("Log out", color="light", size="sm", className="px-3"),
+                                  action="/logout", method="POST"),
+                    ]),
+                ],
+                fluid=True,
+            ),
+            color="primary", dark=True, sticky="top", className="mb-3",
+        ),
+        html.Div(style={"padding": "20px"}, children=[dash.page_container]),
     ])
 
 
@@ -430,16 +488,6 @@ def update_new_value(cellChange, ordinary_invoices, rowData):
         df = analysis.sync_new_value(df, ordinary_invoices)
     df = analysis.finalize_new_value(df)
     return df.to_dict("records")
-
-@callback(
-    Output("nv-net-preference-total", "children"),
-    Input("new_value", "rowData"),
-    prevent_initial_call=True
-)
-def update_nv_totals(rowData):
-    df = pd.DataFrame(rowData or [])
-    total = df["Net Preference"].iloc[-1] if not df.empty else 0.0
-    return f"Net Preference Total: ${total:,.2f}"
 
 def _ocb_transfer_shares(st):
     tot = st.df_preference.groupby("Transfer Number")["Invoice Amount"].sum()
@@ -559,6 +607,29 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
         return {"start": idx, "end": None}, start, end, step, False
     return {"start": sel["start"], "end": idx}, start, end, step, False
 
+def _load_subcase_payload(st, subcase_id):
+    info = load_case(st, subcase_id)
+    store.save_app_state(subcase_id)
+    st = session.get_state()
+    master_info = [
+        html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+        html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
+    ]
+    return (
+        master_info,
+        st.df_historical.to_dict('records'),
+        st.df_preference.to_dict('records'),
+        st.df_snv.to_dict('records'),
+        st.df_ocb.to_dict('records'),
+        info['hist_title'],
+        info['pref_title'],
+        info['hist_count'],
+        info['pref_count'],
+        {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
+         'step': info['ocb_step'], 'total': info['ocb_total_flag']},
+    )
+
+
 @callback(
     Output("subcase-selector", "options"),
     Output("subcase-selector", "value"),
@@ -582,34 +653,33 @@ def selection_changed(master_id, subcase_id):
 
     if trig == "master-selector.value":
         opts = store.list_subcase_options(master_id)
-        first_id = opts[0]["value"] if opts else None
-        return (opts, first_id) + (no_update,) * 10
+        st = session.get_state()
+        sub_ids = {o["value"] for o in opts}
+        if st.meta and st.meta.get("master_id") == master_id and st.active_subcase_id in sub_ids:
+            return (no_update,) * 12
+        if st.subcase_by_master is None:
+            st.subcase_by_master = {}
+        target = st.subcase_by_master.get(master_id)
+        if target not in sub_ids:
+            target = opts[0]["value"] if opts else None
+        if target is None:
+            return opts, None, no_update, no_update, no_update, no_update, no_update, \
+                   no_update, no_update, no_update, no_update, no_update
+        st.subcase_by_master[master_id] = target
+        payload = _load_subcase_payload(st, target)
+        return (opts, target) + payload
 
     if subcase_id is None:
         raise PreventUpdate
 
-    info = load_case(session.get_state(), subcase_id)
-    store.save_app_state(subcase_id)
     st = session.get_state()
-    master_info = [
-        html.Div(f"Transferee: {info['transferee']}   |   Adversary Number: {info['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
-        html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
-    ]
-    return (
-        no_update,
-        no_update,
-        master_info,
-        st.df_historical.to_dict('records'),
-        st.df_preference.to_dict('records'),
-        st.df_snv.to_dict('records'),
-        st.df_ocb.to_dict('records'),
-        info['hist_title'],
-        info['pref_title'],
-        info['hist_count'],
-        info['pref_count'],
-        {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
-         'step': info['ocb_step'], 'total': info['ocb_total_flag']},
-    )
+    if st.meta and st.meta.get("subcase_id") == subcase_id:
+        return (no_update,) * 12
+    if st.subcase_by_master is None:
+        st.subcase_by_master = {}
+    st.subcase_by_master[master_id] = subcase_id
+    payload = _load_subcase_payload(st, subcase_id)
+    return (no_update, no_update) + payload
 
 @callback(
     Output("ocb_grid", "getRowStyle"),
@@ -774,7 +844,7 @@ def update_user_badge(_):
     label = f"{u.role.title()} — {u.username}"
     if u.role in ("admin", "case_manager"):
         return dcc.Link(label, href="/manage",
-                        style={"color": "var(--bs-link-color)", "textDecoration": "none", "fontWeight": "600"})
+                        className="text-white fw-semibold")
     return label
 
 
@@ -904,6 +974,109 @@ def build_cm_details(master_id):
     )
 
 
+_SUBCASE_FIELD_DEFS = [
+    ("cm-file-number", "file_number"),
+    ("cm-filing-date", "filing_date"),
+    ("cm-contact-name", "contact_name"),
+    ("cm-contact-address", "contact_address"),
+    ("cm-contact-address2", "contact_address2"),
+    ("cm-contact-city", "contact_city"),
+    ("cm-contact-state", "contact_state"),
+    ("cm-contact-zip", "contact_zip"),
+    ("cm-contact-phone", "contact_phone"),
+    ("cm-contact-email", "contact_email"),
+    ("cm-attorney-name", "attorney_name"),
+    ("cm-attorney-firm", "attorney_firm"),
+    ("cm-attorney-address", "attorney_address"),
+    ("cm-attorney-address2", "attorney_address2"),
+    ("cm-attorney-city", "attorney_city"),
+    ("cm-attorney-state", "attorney_state"),
+    ("cm-attorney-zip", "attorney_zip"),
+    ("cm-attorney-phone", "attorney_phone"),
+    ("cm-attorney-email", "attorney_email"),
+]
+
+
+@callback(
+    Output("cm-subcase", "options"),
+    Output("cm-subcase", "value"),
+    Input("cm-master", "value"),
+)
+def populate_cm_subcase(master_id):
+    if master_id is None:
+        return [], None
+    opts = store.list_subcase_options(master_id)
+    return opts, opts[0]["value"] if opts else None
+
+
+@callback(
+    [Output(cid, "value") for cid, _ in _SUBCASE_FIELD_DEFS] +
+    [Output(cid, "disabled") for cid, _ in _SUBCASE_FIELD_DEFS],
+    Input("cm-subcase", "value"),
+)
+def populate_cm_subcase_fields(subcase_id):
+    if subcase_id is None:
+        return (None,) * len(_SUBCASE_FIELD_DEFS) * 2
+    can_edit = auth.can_edit_subcase(auth.current_user, subcase_id)
+    sub = store.get_subcase(subcase_id)
+    values = tuple(sub.get(key) or "" for _, key in _SUBCASE_FIELD_DEFS)
+    disabled = tuple(not can_edit for _ in _SUBCASE_FIELD_DEFS)
+    return values + disabled
+
+
+@callback(
+    Output("cm-subcase-status", "children"),
+    Input("cm-save-subcase", "n_clicks"),
+    State("cm-subcase", "value"),
+    State("cm-file-number", "value"),
+    State("cm-filing-date", "value"),
+    State("cm-contact-name", "value"),
+    State("cm-contact-address", "value"),
+    State("cm-contact-address2", "value"),
+    State("cm-contact-city", "value"),
+    State("cm-contact-state", "value"),
+    State("cm-contact-zip", "value"),
+    State("cm-contact-phone", "value"),
+    State("cm-contact-email", "value"),
+    State("cm-attorney-name", "value"),
+    State("cm-attorney-firm", "value"),
+    State("cm-attorney-address", "value"),
+    State("cm-attorney-address2", "value"),
+    State("cm-attorney-city", "value"),
+    State("cm-attorney-state", "value"),
+    State("cm-attorney-zip", "value"),
+    State("cm-attorney-phone", "value"),
+    State("cm-attorney-email", "value"),
+    prevent_initial_call=True,
+)
+def save_subcase(n,
+                 subcase_id, file_number, filing_date,
+                 contact_name, contact_address, contact_address2, contact_city, contact_state,
+                 contact_zip, contact_phone, contact_email,
+                 attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
+                 attorney_state, attorney_zip, attorney_phone, attorney_email):
+    if subcase_id is None:
+        return dbc.Alert("Select a subcase first.", color="warning")
+    auth.guard_edit_subcase(subcase_id)
+    try:
+        fn = store.update_subcase_metadata(
+            subcase_id,
+            file_number=file_number, filing_date=filing_date,
+            contact_name=contact_name, contact_address=contact_address,
+            contact_address2=contact_address2, contact_city=contact_city,
+            contact_state=contact_state, contact_zip=contact_zip,
+            contact_phone=contact_phone, contact_email=contact_email,
+            attorney_name=attorney_name, attorney_firm=attorney_firm,
+            attorney_address=attorney_address, attorney_address2=attorney_address2,
+            attorney_city=attorney_city, attorney_state=attorney_state,
+            attorney_zip=attorney_zip, attorney_phone=attorney_phone,
+            attorney_email=attorney_email,
+        )
+        return dbc.Alert(f"Saved. File number: {fn}", color="success")
+    except ValueError as e:
+        return dbc.Alert(str(e), color="danger")
+
+
 @callback(
     Output("cm-status", "children"),
     Input("cm-save", "n_clicks"),
@@ -996,7 +1169,7 @@ def session_boot(_):
     st = session.get_state()
     info = st.meta
     master_info = [
-        html.Div(f"Transferee: {info['transferee']}   |   Adversary Number: {info['adversary_number']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+        html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
         html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
     ]
     return (

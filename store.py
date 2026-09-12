@@ -60,8 +60,122 @@ def init_cases_db():
         );
         CREATE INDEX IF NOT EXISTS idx_invoices_subcase ON invoice_records(subcase_id);
     ''')
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(subcases)").fetchall()}
+    if 'file_number' not in cols:
+        conn.execute("ALTER TABLE subcases ADD COLUMN file_number TEXT")
+    if 'filing_date' not in cols:
+        conn.execute("ALTER TABLE subcases ADD COLUMN filing_date TEXT")
+    conn.commit()
+    ensure_file_numbers()
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_subcases_file_number ON subcases(file_number)")
     conn.commit()
     return conn
+
+
+def next_file_number():
+    conn = _connect_cases()
+    rows = conn.execute(
+        "SELECT file_number FROM subcases WHERE file_number IS NOT NULL AND file_number != ''"
+    ).fetchall()
+    conn.close()
+    nums = []
+    for (fn,) in rows:
+        try:
+            nums.append(int(fn))
+        except ValueError:
+            continue
+    return f"%06d" % (max(nums) + 1 if nums else 1)
+
+
+def ensure_file_numbers():
+    conn = _connect_cases()
+    rows = conn.execute(
+        "SELECT id FROM subcases WHERE file_number IS NULL OR file_number = '' ORDER BY id"
+    ).fetchall()
+    used = conn.execute(
+        "SELECT file_number FROM subcases WHERE file_number IS NOT NULL AND file_number != ''"
+    ).fetchall()
+    nums = []
+    for (fn,) in used:
+        try:
+            nums.append(int(fn))
+        except ValueError:
+            continue
+    nxt = max(nums) + 1 if nums else 1
+    for (subcase_id,) in rows:
+        conn.execute("UPDATE subcases SET file_number = ? WHERE id = ?",
+                     ("%06d" % nxt, int(subcase_id)))
+        nxt += 1
+    conn.commit()
+    conn.close()
+
+
+def _display_number(adversary_number, filing_date, file_number):
+    return (adversary_number or "") if filing_date else (file_number or "")
+
+
+def get_subcase(subcase_id):
+    conn = _connect_cases()
+    row = conn.execute(
+        "SELECT id, master_case_id, transferee_name, adversary_number, file_number, filing_date, meta "
+        "FROM subcases WHERE id = ?", (int(subcase_id),)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise ValueError(f"No subcase with id {subcase_id}")
+    meta = json.loads(row[6]) if row[6] else {}
+    result = {
+        'id': row[0],
+        'master_case_id': row[1],
+        'transferee_name': row[2],
+        'adversary_number': row[3] or '',
+        'file_number': row[4] or '',
+        'filing_date': row[5] or '',
+    }
+    result['display_number'] = _display_number(result['adversary_number'], result['filing_date'], result['file_number'])
+    for key in (_META_KEYS):
+        result[key] = meta.get(key)
+    return result
+
+
+_META_KEYS = [
+    'contact_name', 'contact_address', 'contact_address2', 'contact_city', 'contact_state',
+    'contact_zip', 'contact_phone', 'contact_email',
+    'attorney_name', 'attorney_firm', 'attorney_address', 'attorney_address2', 'attorney_city',
+    'attorney_state', 'attorney_zip', 'attorney_phone', 'attorney_email',
+]
+
+
+def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, **meta_fields):
+    file_number = (file_number or '').strip()
+    if not file_number:
+        file_number = next_file_number()
+    meta_fields = {k: (v or '').strip() for k, v in meta_fields.items()}
+
+    if filing_date:
+        try:
+            datetime.strptime(filing_date, '%Y-%m-%d')
+        except ValueError:
+            raise ValueError('filing_date must be YYYY-MM-DD.')
+    else:
+        filing_date = ''
+
+    conn = _connect_cases()
+    try:
+        dup = conn.execute(
+            "SELECT id FROM subcases WHERE file_number = ? AND id != ?",
+            (file_number, int(subcase_id)),
+        ).fetchone()
+        if dup:
+            raise ValueError(f"A subcase with file number '{file_number}' already exists.")
+        conn.execute(
+            "UPDATE subcases SET file_number = ?, filing_date = ?, meta = ? WHERE id = ?",
+            (file_number, filing_date, json.dumps(meta_fields), int(subcase_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return file_number
 
 
 def init_state_db():
@@ -127,7 +241,7 @@ def list_master_options():
 def list_subcase_options(master_id=None):
     conn = _connect_cases()
     sql = '''
-        SELECT s.id, s.transferee_name, s.adversary_number
+        SELECT s.id, s.transferee_name, s.adversary_number, s.file_number, s.filing_date
         FROM subcases s
     '''
     params = ()
@@ -138,8 +252,9 @@ def list_subcase_options(master_id=None):
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     options = []
-    for subcase_id, name, adv in rows:
-        label = f"{name} ({adv})" if adv else name
+    for subcase_id, name, adv, file_number, filing_date in rows:
+        id_label = _display_number(adv, filing_date, file_number)
+        label = f"{name} ({id_label})" if id_label else name
         options.append({"label": label, "value": subcase_id})
     return options
 
@@ -148,7 +263,7 @@ def get_master_by_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute('''
         SELECT m.id, m.case_name, m.case_number, m.jurisdiction, m.judge, m.petition_date,
-               s.transferee_name, s.adversary_number
+               s.transferee_name, s.adversary_number, s.file_number, s.filing_date
         FROM subcases s JOIN master_cases m ON m.id = s.master_case_id
         WHERE s.id = ?
     ''', (int(subcase_id),)).fetchone()
@@ -164,6 +279,8 @@ def get_master_by_subcase(subcase_id):
         'petition_date': row[5],
         'transferee': row[6],
         'adversary_number': row[7],
+        'file_number': row[8],
+        'filing_date': row[9],
     }
 
 

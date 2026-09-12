@@ -7,6 +7,8 @@ from flask import render_template_string, request, redirect
 from flask_login import LoginManager, UserMixin, current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash
 
+import dash_bootstrap_components as dbc
+
 import store
 
 ROLES = ('admin', 'case_manager', 'user')
@@ -74,7 +76,7 @@ def login():
             nxt = request.args.get('next')
             return redirect(nxt if nxt and nxt.startswith('/') else '/')
         error = 'Invalid username or password.'
-    return render_template_string(LOGIN_TEMPLATE, error=error)
+    return render_template_string(LOGIN_TEMPLATE, error=error, zephyr=dbc.themes.SPACELAB)
 
 
 def logout():
@@ -149,26 +151,37 @@ LOGIN_TEMPLATE = """<!doctype html>
 <link rel="stylesheet" href="{{ zephyr }}">
 <style>
   body { display: flex; align-items: center; justify-content: center; min-height: 100vh;
-         background: var(--bs-tertiary-bg); padding: 1rem; }
-  .card { width: 100%; max-width: 380px; padding: 2rem;
-          border: 1px solid var(--bs-border-color); border-radius: 0.75rem;
-          background: var(--bs-body-bg); }
+         background: #e9ecef; padding: 1rem; }
+  .card { width: 100%; max-width: 420px; padding: 2.25rem; margin: auto;
+          border: 1px solid #000; border-radius: 0.75rem; background: #fff;
+          box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.08); }
+  .form-label { font-weight: 700; text-align: right; line-height: 1.2; }
 </style>
 </head>
 <body>
   <div class="card">
-    <h2 class="h4 mb-3">Preference Analysis Tool</h2>
-    {% if error %}<div class="alert alert-danger py-2">{{ error }}</div>{% endif %}
+    <h2 class="h4 mb-4">Preference Analysis Tool</h2>
+    {% if error %}<div class="alert alert-danger py-2 mb-4">{{ error }}</div>{% endif %}
     <form method="post">
-      <div class="mb-3">
-        <label class="form-label" for="username">Username</label>
-        <input class="form-control" id="username" name="username" autocomplete="username" required autofocus>
+      <div class="row align-items-center mb-4">
+        <div class="col-4">
+          <label class="form-label mb-0" for="username">Username</label>
+        </div>
+        <div class="col-8">
+          <input class="form-control" id="username" name="username" autocomplete="username" required autofocus>
+        </div>
       </div>
-      <div class="mb-3">
-        <label class="form-label" for="password">Password</label>
-        <input class="form-control" type="password" id="password" name="password" autocomplete="current-password" required>
+      <div class="row align-items-center mb-4">
+        <div class="col-4">
+          <label class="form-label mb-0" for="password">Password</label>
+        </div>
+        <div class="col-8">
+          <input class="form-control" type="password" id="password" name="password" autocomplete="current-password" required>
+        </div>
       </div>
-      <button class="btn btn-primary w-100" type="submit">Sign in</button>
+      <div class="d-flex justify-content-end pt-2">
+        <button class="btn btn-primary" type="submit">Sign in</button>
+      </div>
     </form>
   </div>
 </body>
