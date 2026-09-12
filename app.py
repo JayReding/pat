@@ -7,6 +7,7 @@ import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
 import pandas as pd
 import numpy as np
+from plotly import graph_objects as go
 
 import analysis
 import store
@@ -176,12 +177,11 @@ def _analysis_page():
     html.Div(children=[
             dcc.Tabs([
          dcc.Tab(id="summary", label='Case Summary', children=[
-            html.H3(children='Case Summary'),
             html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "marginBottom": "20px"}, children=[
-                _callout("cs-net-pref-figure", "Net Preference (Defenses Applied)", "fa-solid fa-dollar-sign fa-3x"),
+                _callout("cs-net-pref-figure", "Net Preference", "fa-solid fa-dollar-sign fa-3x"),
                 _callout("cs-total-transfers", "Total Transfers", "fa-solid fa-money-bill-transfer fa-3x", color_var="var(--bs-info)"),
                 _callout("cs-total-new-value", "Total New Value", "fa-solid fa-hand-holding-dollar fa-3x", color_var="var(--bs-info)"),
-                _callout("cs-ordinary-course", "Ordinary Course Amount", "fa-solid fa-scale-balanced fa-3x", color_var="var(--bs-info)"),
+                _callout("cs-ordinary-course", "Ordinary Course", "fa-solid fa-chart-simple fa-3x", color_var="var(--bs-info)"),
             ]),
             dbc.ListGroup([
                 dbc.ListGroupItem([html.Strong('Total Transfers: '), html.Span(id="summary-total-transfers")]),
@@ -196,7 +196,7 @@ def _analysis_page():
 dcc.Tab(label='Historical Period', children=[
             html.H3(id="hist-period-title", children=""),
             html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
-            html.Div(style={"flex": "0 0 320px", "padding": "16px", "border": "1px solid var(--bs-border-color)",
+            html.Div(style={"flex": "1 1 0", "padding": "16px", "border": "1px solid var(--bs-border-color)",
                             "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
                html.Div(id="hist-period-invoice-count", children=""),
                html.Div(id="hist-average_dso"),
@@ -205,6 +205,14 @@ dcc.Tab(label='Historical Period', children=[
                html.Div(id="hist-weighted_dpd"),
                html.Div(id="hist-skew")
             ]),
+            dcc.Graph(
+                id="hist-distribution-graph",
+                style={"flex": "1 1 0", "minWidth": "0", "height": "420px"},
+                figure={},
+                config={"displaylogo": False, "responsive": True}
+            ),
+            ]),
+            html.Div(style={"display": "flex", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
             dag.AgGrid(
                 id="historical",
                 rowData=[],
@@ -548,6 +556,8 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
 
     tr_amt = st.df_transfers.groupby("Transfer Number")["Transfer Amount"].sum()
     ordinary_course_amount = (tr_amt * (ord_shares / tot_shares).reindex(tr_amt.index).fillna(0.0)).sum()
+    new_value_cap = max(0.0, total_transfers - ordinary_course_amount)
+    total_new_value = min(total_new_value, new_value_cap)
     if abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount) > 0.01:
         print(f"OCA identity off by ${abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount):,.2f}")
 
@@ -808,6 +818,61 @@ def update_hist_totals(rowData):
         skew_warning = ""
     
     return f"Historical Period Average DSO: {average_dso:.2f}", f"Historical Period Average DPD: {average_dpd:.2f}", f"Historical Period Weighted DSO: {weighted_dso:.2f}", f"Historical Period Weighted DPD: {weighted_dpd:.2f}", f"Historical Period Skew: {skew:.2f}, {skew_warning}"
+
+
+@callback(
+    Output("hist-distribution-graph", "figure"),
+    Input("historical", "rowData"),
+    prevent_initial_call=True
+)
+def update_hist_distribution(rowData):
+    df = pd.DataFrame(rowData)
+    if df.empty or "Invoice to Payment" not in df:
+        return go.Figure()
+    x = df["Invoice to Payment"].dropna().to_numpy(dtype=float)
+    if x.size == 0:
+        return go.Figure()
+    xmax = 70.0
+    x = x[x <= xmax]
+    if x.size == 0:
+        return go.Figure()
+    grid, density = analysis.gaussian_kde(x)
+    counts = density * x.size
+    n = x.size
+    q1, q3 = np.percentile(x, [25, 75])
+    mean = x.mean()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=grid, y=counts, mode="lines", name="Invoice Distribution",
+        line={"color": "#3459e6", "width": 2},
+        hovertemplate="Invoice to Payment: %{x:.0f} days<br>Number of Invoices: %{y:.2f}<extra></extra>"
+    ))
+    fig.add_vline(x=mean, line_dash="dash", line_color="#888",
+                  annotation_text=f"Mean {mean:.0f}d",
+                  annotation_position="top")
+    fig.add_vline(x=q1, line_dash="dot", line_color="#aaa",
+                  annotation_text=f"Q1 {q1:.0f}d", annotation_position="bottom")
+    fig.add_vline(x=q3, line_dash="dot", line_color="#aaa",
+                  annotation_text=f"Q3 {q3:.0f}d", annotation_position="bottom")
+    fig.update_layout(
+        title={"text": f"Invoice to Payment Distribution ({n} invoices)",
+               "x": 0.0, "font": {"size": 13}},
+        xaxis_title="Invoice to Payment (days)",
+        yaxis_title="Number of Invoices",
+        margin={"l": 50, "r": 20, "t": 50, "b": 45},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#d8deea"},
+        autosize=True,
+    )
+    fig.update_xaxes(
+        showgrid=False, zeroline=False,
+        showline=True, linewidth=1, linecolor="#d8deea",
+        range=[0, xmax],
+    )
+    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#d8deea")
+    return fig
+
 
 @callback(
     Output("pref-average_dso", "children"),

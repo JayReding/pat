@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 
@@ -164,6 +165,36 @@ def compare_hist_pref(hist_df, pref_df):
     pref_weighted_dso = calc_weighted_dso(pref_df)
     diff = (pref_weighted_dso - hist_weighted_dso) / hist_weighted_dso * 100
     return diff
+
+
+def gaussian_kde(x, grid_points=200):
+    """
+    Gaussian kernel density estimate over a grid covering the data range.
+
+    Uses the Silverman rule-of-thumb bandwidth. Returns a tuple of
+    (grid, density) arrays suitable for a smooth fitted curve.
+
+    Args:
+        x: 1D array-like of sample values.
+        grid_points: number of grid points spanning min(x)..max(x).
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.array([]), np.array([])
+    n = x.size
+    std = x.std(ddof=1) if n > 1 else 0.0
+    q75, q25 = np.percentile(x, [75, 25])
+    iqr = q75 - q25
+    bw = 0.9 * min(std, iqr / 1.34) * n ** (-0.2)
+    if bw == 0 or not np.isfinite(bw):
+        bw = std if std > 0 else (x.max() - x.min()) / (grid_points - 1)
+    if bw == 0:
+        bw = 1.0
+    grid = np.linspace(x.min(), x.max(), grid_points)
+    z = (grid[:, None] - x[None, :]) / bw
+    density = (np.exp(-0.5 * z ** 2).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi)))
+    return grid, density
 
 
 def calc_net_pref_defenses(df_nv, tot_shares, ord_shares):
