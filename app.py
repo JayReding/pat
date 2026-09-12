@@ -116,8 +116,22 @@ session.set_loader(_session_loader)
 
 
 # Initialize the app
-app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.SPACELAB, dbc.icons.FONT_AWESOME])
+app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.ZEPHYR, dbc.icons.FONT_AWESOME])
 app.title = "Preference Analysis Tool"
+
+
+def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)"):
+    return html.Div(style={
+        "flex": "0 0 260px", "display": "flex", "alignItems": "center",
+        "justifyContent": "space-between", "gap": "20px", "padding": "20px 24px",
+        "borderRadius": "12px", "backgroundColor": color_var, "color": "#fff",
+    }, children=[
+        html.Div([
+            html.Div(id=figure_id, style={"fontSize": "1.75rem", "fontWeight": "700"}),
+            html.Div(label, style={"opacity": ".9"}),
+        ]),
+        html.I(className=icon_class, **{"aria-hidden": "true"}, style={"opacity": ".8", "fontSize": "3rem"}),
+    ])
 
 
 def _analysis_page():
@@ -163,6 +177,12 @@ def _analysis_page():
             dcc.Tabs([
          dcc.Tab(id="summary", label='Case Summary', children=[
             html.H3(children='Case Summary'),
+            html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "marginBottom": "20px"}, children=[
+                _callout("cs-net-pref-figure", "Net Preference (Defenses Applied)", "fa-solid fa-dollar-sign fa-3x"),
+                _callout("cs-total-transfers", "Total Transfers", "fa-solid fa-money-bill-transfer fa-3x", color_var="var(--bs-info)"),
+                _callout("cs-total-new-value", "Total New Value", "fa-solid fa-hand-holding-dollar fa-3x", color_var="var(--bs-info)"),
+                _callout("cs-ordinary-course", "Ordinary Course Amount", "fa-solid fa-scale-balanced fa-3x", color_var="var(--bs-info)"),
+            ]),
             dbc.ListGroup([
                 dbc.ListGroupItem([html.Strong('Total Transfers: '), html.Span(id="summary-total-transfers")]),
                 dbc.ListGroupItem([html.Strong('Total New Value: '), html.Span(id="summary-total-new-value")]),
@@ -179,7 +199,6 @@ dcc.Tab(label='Historical Period', children=[
             html.Div(style={"flex": "0 0 320px", "padding": "16px", "border": "1px solid var(--bs-border-color)",
                             "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
                html.Div(id="hist-period-invoice-count", children=""),
-               html.Div(id="hist-total-output"),
                html.Div(id="hist-average_dso"),
                html.Div(id="hist-average_dpd"),
                html.Div(id="hist-weighted_dso"),
@@ -211,7 +230,6 @@ dcc.Tab(label='Historical Period', children=[
             html.Div(style={"flex": "0 0 320px", "padding": "16px", "border": "1px solid var(--bs-border-color)",
                             "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
                html.Div(id="pref-period-invoice-count", children=""),
-               html.Div(id="pref-total-output"),
                html.Div(id="pref-average_dso"),
                html.Div(id="pref-average_dpd"),
                html.Div(id="pref-weighted_dso"),
@@ -504,6 +522,10 @@ def _ocb_transfer_shares(st):
     Output("summary-pref-wavg", "children"),
     Output("summary-dso-diff", "children"),
     Output("ocb-net-pref-defenses", "children"),
+    Output("cs-net-pref-figure", "children"),
+    Output("cs-total-transfers", "children"),
+    Output("cs-total-new-value", "children"),
+    Output("cs-ordinary-course", "children"),
     Input("new_value", "rowData"),
     Input("ocb-ordinary-invoices", "data"),
     Input("ocb-range", "data"),
@@ -524,10 +546,16 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     tot_shares, ord_shares = _ocb_transfer_shares(st)
     net_pref_defenses = analysis.calc_net_pref_defenses(df_nv, tot_shares, ord_shares)
 
+    tr_amt = st.df_transfers.groupby("Transfer Number")["Transfer Amount"].sum()
+    ordinary_course_amount = (tr_amt * (ord_shares / tot_shares).reindex(tr_amt.index).fillna(0.0)).sum()
+    if abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount) > 0.01:
+        print(f"OCA identity off by ${abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount):,.2f}")
+
     return (f"${total_transfers:,.2f}", f"${total_new_value:,.2f}", f"${net_new_value:,.2f}",
             f"${net_pref_defenses:,.2f}",
             f"{hist_wavg:.2f}", f"{pref_wavg:.2f}", f"{diff:.2f}%",
-            f"${net_pref_defenses:,.2f}")
+            f"${net_pref_defenses:,.2f}", f"${net_pref_defenses:,.2f}", f"${total_transfers:,.2f}", f"${total_new_value:,.2f}",
+            f"${ordinary_course_amount:,.2f}")
 
 @callback(
     Output("ocb_grid", "rowData"),
@@ -758,7 +786,6 @@ def update_ocb_warning(sel, start, end, step):
     return ""
  
 @callback(
-    Output("hist-total-output", "children"),
     Output("hist-average_dso", "children"),
     Output("hist-average_dpd", "children"),
     Output("hist-weighted_dso", "children"),
@@ -770,7 +797,6 @@ def update_ocb_warning(sel, start, end, step):
  
 def update_hist_totals(rowData):
     df = pd.DataFrame(rowData)
-    total = df["Transfer Amount"].sum()
     average_dso = df["Invoice to Payment"].mean()
     average_dpd = df["Days Past Due"].mean()
     weighted_dso = analysis.calc_weighted_dso(df)
@@ -781,10 +807,9 @@ def update_hist_totals(rowData):
     else:
         skew_warning = ""
     
-    return f"Historical Period Total Transfer Amount: ${total:,.2f}", f"Historical Period Average DSO: {average_dso:.2f}", f"Historical Period Average DPD: {average_dpd:.2f}", f"Historical Period Weighted DSO: {weighted_dso:.2f}", f"Historical Period Weighted DPD: {weighted_dpd:.2f}", f"Historical Period Skew: {skew:.2f}, {skew_warning}"
+    return f"Historical Period Average DSO: {average_dso:.2f}", f"Historical Period Average DPD: {average_dpd:.2f}", f"Historical Period Weighted DSO: {weighted_dso:.2f}", f"Historical Period Weighted DPD: {weighted_dpd:.2f}", f"Historical Period Skew: {skew:.2f}, {skew_warning}"
 
 @callback(
-    Output("pref-total-output", "children"),
     Output("pref-average_dso", "children"),
     Output("pref-average_dpd", "children"),
     Output("pref-weighted_dso", "children"),
@@ -797,13 +822,12 @@ def update_hist_totals(rowData):
 def update_pref_totals(rowData):
     st = session.get_state()
     df = pd.DataFrame(rowData)
-    total = df["Transfer Amount"].sum()
     average_dso = df["Invoice to Payment"].mean()
     average_dpd = df["Days Past Due"].mean()
     weighted_dso = analysis.calc_weighted_dso(df)
     weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
     diff = analysis.compare_hist_pref(st.df_historical, st.df_preference)
-    return f"Preference Period Total Transfer Amount: ${total:,.2f}", f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}", f"Weighted DSO Difference (Historical vs Preference): {diff:.2f}%"
+    return f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}", f"Weighted DSO Difference (Historical vs Preference): {diff:.2f}%"
 
 @callback(
     Output("autosave-status", "children"),

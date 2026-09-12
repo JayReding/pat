@@ -76,7 +76,7 @@ def login():
             nxt = request.args.get('next')
             return redirect(nxt if nxt and nxt.startswith('/') else '/')
         error = 'Invalid username or password.'
-    return render_template_string(LOGIN_TEMPLATE, error=error, zephyr=dbc.themes.SPACELAB)
+    return render_template_string(LOGIN_TEMPLATE, error=error, zephyr=dbc.themes.ZEPHYR)
 
 
 def logout():
