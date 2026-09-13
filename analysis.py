@@ -198,7 +198,16 @@ def gaussian_kde(x, grid_points=200):
 
 
 def calc_net_pref_defenses(df_nv, tot_shares, ord_shares):
+    """
+    Computes the net preference after defenses and the amount of new value
+    actually applied, in one date-ordered running pass.
+
+    Returns:
+        (net_pref_defenses, applied_new_value): the final running balance and
+        the total of new-value subtractions that were not floored away.
+    """
     running = 0.0
+    applied_new_value = 0.0
     for row in df_nv.to_dict("records"):
         t_amt = row.get("Transfer Amount")
         if pd.notna(t_amt):
@@ -207,5 +216,9 @@ def calc_net_pref_defenses(df_nv, tot_shares, ord_shares):
             o = ord_shares.get(tr, 0.0)
             running = max(0.0, running + t_amt * (1 - (o / t if t else 0.0)))
         else:
-            running = max(0.0, running - (row.get("Allowed New Value") or 0))
-    return running
+            av = row.get("Allowed New Value") or 0
+            if av > 0:
+                before = running
+                running = max(0.0, running - av)
+                applied_new_value += before - running
+    return running, applied_new_value

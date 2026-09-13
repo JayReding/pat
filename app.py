@@ -544,7 +544,6 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     if st.df_transfers is None or st.df_historical is None or st.df_preference is None:
         return dash.no_update
     df_nv = pd.DataFrame(nv_rowData or [])
-    total_new_value = df_nv["Allowed New Value"].sum() if not df_nv.empty else 0.0
     net_new_value = df_nv["Net Preference"].iloc[-1] if not df_nv.empty else 0.0
     total_transfers = st.df_transfers["Transfer Amount"].sum()
     hist_wavg = analysis.calc_weighted_dso(st.df_historical)
@@ -552,12 +551,10 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     diff = (pref_wavg - hist_wavg) / hist_wavg * 100
 
     tot_shares, ord_shares = _ocb_transfer_shares(st)
-    net_pref_defenses = analysis.calc_net_pref_defenses(df_nv, tot_shares, ord_shares)
+    net_pref_defenses, total_new_value = analysis.calc_net_pref_defenses(df_nv, tot_shares, ord_shares)
 
     tr_amt = st.df_transfers.groupby("Transfer Number")["Transfer Amount"].sum()
     ordinary_course_amount = (tr_amt * (ord_shares / tot_shares).reindex(tr_amt.index).fillna(0.0)).sum()
-    new_value_cap = max(0.0, total_transfers - ordinary_course_amount)
-    total_new_value = min(total_new_value, new_value_cap)
     if abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount) > 0.01:
         print(f"OCA identity off by ${abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount):,.2f}")
 
@@ -832,28 +829,15 @@ def update_hist_distribution(rowData):
     x = df["Invoice to Payment"].dropna().to_numpy(dtype=float)
     if x.size == 0:
         return go.Figure()
-    xmax = 70.0
-    x = x[x <= xmax]
-    if x.size == 0:
-        return go.Figure()
-    grid, density = analysis.gaussian_kde(x)
-    counts = density * x.size
     n = x.size
-    q1, q3 = np.percentile(x, [25, 75])
-    mean = x.mean()
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=grid, y=counts, mode="lines", name="Invoice Distribution",
-        line={"color": "#3459e6", "width": 2},
-        hovertemplate="Invoice to Payment: %{x:.0f} days<br>Number of Invoices: %{y:.2f}<extra></extra>"
+    fig.add_trace(go.Histogram(
+        x=x,
+        name="Invoice Distribution",
+        xbins={"start": 0, "size": 5},
+        marker={"color": "#3459e6", "line": {"color": "#d8deea", "width": 1}},
+        hovertemplate="Invoice to Payment: %{x} days<br>Number of Invoices: %{y}<extra></extra>"
     ))
-    fig.add_vline(x=mean, line_dash="dash", line_color="#888",
-                  annotation_text=f"Mean {mean:.0f}d",
-                  annotation_position="top")
-    fig.add_vline(x=q1, line_dash="dot", line_color="#aaa",
-                  annotation_text=f"Q1 {q1:.0f}d", annotation_position="bottom")
-    fig.add_vline(x=q3, line_dash="dot", line_color="#aaa",
-                  annotation_text=f"Q3 {q3:.0f}d", annotation_position="bottom")
     fig.update_layout(
         title={"text": f"Invoice to Payment Distribution ({n} invoices)",
                "x": 0.0, "font": {"size": 13}},
@@ -862,15 +846,17 @@ def update_hist_distribution(rowData):
         margin={"l": 50, "r": 20, "t": 50, "b": 45},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font={"color": "#d8deea"},
+        font={"color": "#343a40"},
+        showlegend=True,
+        legend={"font": {"color": "#000000"}, "bgcolor": "#ffffff",
+                "borderwidth": 1, "bordercolor": "#adb5bd"},
         autosize=True,
     )
     fig.update_xaxes(
         showgrid=False, zeroline=False,
-        showline=True, linewidth=1, linecolor="#d8deea",
-        range=[0, xmax],
+        showline=True, linewidth=1, linecolor="#adb5bd",
     )
-    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#d8deea")
+    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#adb5bd")
     return fig
 
 
