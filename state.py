@@ -16,3 +16,4 @@ class CaseState:
     loaded: bool = False
     meta: Any = None
     subcase_by_master: Any = None
+    ocb_metric: str = "Invoice to Payment"

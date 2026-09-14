@@ -193,8 +193,12 @@ def init_state_db():
         ocb_step INTEGER,
         ocb_range TEXT,
         ocb_total_flag INTEGER,
-        nv_settings TEXT
+        nv_settings TEXT,
+        ocb_metric TEXT
     )''')
+    scols = {row[1] for row in cur.execute("PRAGMA table_info(case_settings)").fetchall()}
+    if 'ocb_metric' not in scols:
+        cur.execute("ALTER TABLE case_settings ADD COLUMN ocb_metric TEXT")
     cur.execute('''CREATE TABLE IF NOT EXISTS app_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         active_subcase_id INTEGER
@@ -312,7 +316,7 @@ def load_case_settings(subcase_id):
     conn = _connect_state()
     cur = conn.cursor()
     cur.execute(
-        "SELECT ocb_start, ocb_end, ocb_step, ocb_range, ocb_total_flag, nv_settings "
+        "SELECT ocb_start, ocb_end, ocb_step, ocb_range, ocb_total_flag, nv_settings, ocb_metric "
         "FROM case_settings WHERE subcase_id = ?", (int(subcase_id),))
     row = cur.fetchone()
     conn.close()
@@ -325,22 +329,24 @@ def load_case_settings(subcase_id):
         'ocb_range': json.loads(row[3]) if row[3] else None,
         'ocb_total_flag': bool(row[4]) if row[4] is not None else False,
         'nv_settings': json.loads(row[5]) if row[5] else None,
+        'ocb_metric': row[6],
     }
 
 
-def save_case_settings(subcase_id, ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_settings):
+def save_case_settings(subcase_id, ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_settings, ocb_metric=None):
     ocb_range_json = json.dumps(ocb_range) if ocb_range is not None else None
     nv_json = json.dumps(nv_settings) if nv_settings else None
     conn = _connect_state()
     conn.execute(
-        """INSERT INTO case_settings (subcase_id, ocb_start, ocb_end, ocb_step, ocb_range, ocb_total_flag, nv_settings)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+        """INSERT INTO case_settings (subcase_id, ocb_start, ocb_end, ocb_step, ocb_range, ocb_total_flag, nv_settings, ocb_metric)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(subcase_id) DO UPDATE SET
                ocb_start=excluded.ocb_start, ocb_end=excluded.ocb_end,
                ocb_step=excluded.ocb_step, ocb_range=excluded.ocb_range,
-               ocb_total_flag=excluded.ocb_total_flag, nv_settings=excluded.nv_settings""",
+               ocb_total_flag=excluded.ocb_total_flag, nv_settings=excluded.nv_settings,
+               ocb_metric=excluded.ocb_metric""",
         (int(subcase_id), int(ocb_start or 0), int(ocb_end or 100), int(ocb_step or 5),
-         ocb_range_json, int(bool(ocb_total_flag)), nv_json),
+         ocb_range_json, int(bool(ocb_total_flag)), nv_json, ocb_metric),
     )
     conn.commit()
     conn.close()

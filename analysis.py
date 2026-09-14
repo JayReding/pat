@@ -76,15 +76,15 @@ def finalize_new_value(df):
     return df
 
 
-def build_ocb_data(pref_df, hist_df, start=0, end=100, step=5):
+def build_ocb_data(pref_df, hist_df, start=0, end=100, step=5, metric="Invoice to Payment"):
     nrows = max(1, (end - start) // step)
     edges = [start] + [start + k*step + 1 for k in range(1, nrows)] + [end + 1]
     labels = [f"< {start}"] + [f"{edges[i]}-{edges[i+1]-1}" for i in range(nrows)] + [f"> {end}"]
     bins = [float("-inf")] + edges + [float("inf")]
     p = pref_df.copy()
     h = hist_df.copy()
-    p["bin"] = pd.cut(p["Invoice to Payment"], bins=bins, labels=labels, right=False, include_lowest=True)
-    h["bin"] = pd.cut(h["Invoice to Payment"], bins=bins, labels=labels, right=False, include_lowest=True)
+    p["bin"] = pd.cut(p[metric], bins=bins, labels=labels, right=False, include_lowest=True)
+    h["bin"] = pd.cut(h[metric], bins=bins, labels=labels, right=False, include_lowest=True)
     rows = []
     for lab in labels:
         pi = p.index[p["bin"] == lab]
@@ -156,8 +156,12 @@ def ocb_row_index(value, df, start, end):
     return 0
 
 
+def calc_weighted(df, metric):
+    return df[metric].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
+
+
 def calc_weighted_dso(df):
-    return df["Invoice to Payment"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
+    return calc_weighted(df, "Invoice to Payment")
 
 
 def compare_hist_pref(hist_df, pref_df):
