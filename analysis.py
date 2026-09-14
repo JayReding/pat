@@ -164,10 +164,14 @@ def calc_weighted_dso(df):
     return calc_weighted(df, "Invoice to Payment")
 
 
-def compare_hist_pref(hist_df, pref_df):
-    hist_weighted_dso = calc_weighted_dso(hist_df)
-    pref_weighted_dso = calc_weighted_dso(pref_df)
-    diff = (pref_weighted_dso - hist_weighted_dso) / hist_weighted_dso * 100
+def calc_weighted_dpd(df):
+    return calc_weighted(df, "Days Past Due")
+
+
+def compare_hist_pref(hist_df, pref_df, metric="Invoice to Payment"):
+    hist_wavg = calc_weighted(hist_df, metric)
+    pref_wavg = calc_weighted(pref_df, metric)
+    diff = (pref_wavg - hist_wavg) / hist_wavg * 100
     return diff
 
 

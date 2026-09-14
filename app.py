@@ -7,9 +7,12 @@ import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
 import pandas as pd
 import numpy as np
+from dateutil.relativedelta import relativedelta
 from plotly import graph_objects as go
 
 import analysis
+import export_excel
+import export_pdf
 import store
 import auth
 import session
@@ -122,17 +125,19 @@ app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.ZEP
 app.title = "Preference Analysis Tool"
 
 
-def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)"):
+def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)",
+             background=None, border="none", text_color="#fff", icon_id=None):
     return html.Div(style={
         "flex": "0 0 260px", "display": "flex", "alignItems": "center",
         "justifyContent": "space-between", "gap": "20px", "padding": "20px 24px",
-        "borderRadius": "12px", "backgroundColor": color_var, "color": "#fff",
+        "borderRadius": "12px", "backgroundColor": background or color_var,
+        "border": border, "color": text_color,
     }, children=[
         html.Div([
             html.Div(id=figure_id, style={"fontSize": "1.75rem", "fontWeight": "700"}),
             html.Div(label, style={"opacity": ".9"}),
         ]),
-        html.I(className=icon_class, **{"aria-hidden": "true"}, style={"opacity": ".8", "fontSize": "3rem"}),
+        html.I(**(dict(id=icon_id) if icon_id else {}), className=icon_class, **{"aria-hidden": "true"}, style={"opacity": ".8", "fontSize": "3rem"}),
     ])
 
 
@@ -184,6 +189,12 @@ def _analysis_page():
                 _callout("cs-total-new-value", "Total New Value", "fa-solid fa-hand-holding-dollar fa-3x", color_var="var(--bs-info)"),
                 _callout("cs-ordinary-course", "Ordinary Course", "fa-solid fa-chart-simple fa-3x", color_var="var(--bs-info)"),
             ]),
+            html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "marginBottom": "20px"}, children=[
+                _callout("cs-dso-diff-figure", "Change in Days Outstanding", "fa-solid fa-arrow-trend-up fa-3x",
+                         background="var(--bs-body-bg)", border="1px solid #000", text_color="#000", icon_id="cs-dso-diff-icon"),
+                _callout("cs-dpd-diff-figure", "Change in Days Past Due", "fa-solid fa-arrow-trend-up fa-3x",
+                         background="var(--bs-body-bg)", border="1px solid #000", text_color="#000", icon_id="cs-dpd-diff-icon"),
+            ]),
             dbc.ListGroup([
                 dbc.ListGroupItem([html.Strong('Total Transfers: '), html.Span(id="summary-total-transfers")]),
                 dbc.ListGroupItem([html.Strong('Total New Value: '), html.Span(id="summary-total-new-value")]),
@@ -195,16 +206,18 @@ def _analysis_page():
             ]),
         ]),
 dcc.Tab(label='Historical Period', children=[
-            html.H3(id="hist-period-title", children=""),
             html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
-            html.Div(style={"flex": "1 1 0", "padding": "16px", "border": "1px solid var(--bs-border-color)",
-                            "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
-               html.Div(id="hist-period-invoice-count", children=""),
-               html.Div(id="hist-average_dso"),
-               html.Div(id="hist-average_dpd"),
-               html.Div(id="hist-weighted_dso"),
-               html.Div(id="hist-weighted_dpd"),
-               html.Div(id="hist-skew")
+            html.Div(style={"flex": "1 1 0", "display": "flex", "flexDirection": "column", "gap": "12px"}, children=[
+                html.Div(style={"border": "1px solid var(--bs-border-color)",
+                                "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
+                    html.Div(id="hist-stats-table", children=""),
+                ]),
+                html.Div(style={"display": "flex", "gap": "30px"}, children=[
+                    dbc.Button("Export Excel", id="export-hist-excel-btn", color="primary", size="sm"),
+                    dbc.Button("Export PDF", id="export-hist-pdf-btn", color="primary", size="sm"),
+                    dcc.Download(id="download-hist-pdf"),
+                    dcc.Download(id="download-hist-excel"),
+                ]),
             ]),
             dcc.Graph(
                 id="hist-distribution-graph",
@@ -234,17 +247,27 @@ dcc.Tab(label='Historical Period', children=[
     ]),
 
          dcc.Tab(label='Preference Period', children=[
-            html.H3(id="pref-period-title", children=""),
             html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
-            html.Div(style={"flex": "0 0 320px", "padding": "16px", "border": "1px solid var(--bs-border-color)",
-                            "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
-               html.Div(id="pref-period-invoice-count", children=""),
-               html.Div(id="pref-average_dso"),
-               html.Div(id="pref-average_dpd"),
-               html.Div(id="pref-weighted_dso"),
-               html.Div(id="pref-weighted_dpd"),
-               html.Div(id="diff-wavg", style={"font-weight": "bold"})
+            html.Div(style={"flex": "1 1 0", "display": "flex", "flexDirection": "column", "gap": "12px"}, children=[
+                html.Div(style={"border": "1px solid var(--bs-border-color)",
+                                "borderRadius": "0.375rem", "backgroundColor": "var(--bs-tertiary-bg)"}, children=[
+                    html.Div(id="pref-stats-table", children=""),
+                ]),
+                html.Div(style={"display": "flex", "gap": "30px"}, children=[
+                    dbc.Button("Export Excel", id="export-pref-excel-btn", color="primary", size="sm"),
+                    dbc.Button("Export PDF", id="export-pref-pdf-btn", color="primary", size="sm"),
+                    dcc.Download(id="download-pref-pdf"),
+                    dcc.Download(id="download-pref-excel"),
+                ]),
             ]),
+            dcc.Graph(
+                id="pref-distribution-graph",
+                style={"flex": "1 1 0", "minWidth": "0", "height": "420px"},
+                figure={},
+                config={"displaylogo": False, "responsive": True}
+            ),
+            ]),
+            html.Div(style={"display": "flex", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
             dag.AgGrid(
               id="preference",
               rowData=[],
@@ -255,6 +278,7 @@ dcc.Tab(label='Historical Period', children=[
                 {"field": "Transfer Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
                 {"field": "Payment Date"},
                 {"field": "Invoice Number"},
+                {"field": "Invoice Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
                 {"field": "Invoice Date"},
                 {"field": "Invoice Due"},
                 {"field": "Invoice to Payment"},
@@ -542,6 +566,10 @@ def _ocb_transfer_shares(st):
     Output("cs-total-transfers", "children"),
     Output("cs-total-new-value", "children"),
     Output("cs-ordinary-course", "children"),
+    Output("cs-dso-diff-figure", "children"),
+    Output("cs-dso-diff-icon", "className"),
+    Output("cs-dpd-diff-figure", "children"),
+    Output("cs-dpd-diff-icon", "className"),
     Input("new_value", "rowData"),
     Input("ocb-ordinary-invoices", "data"),
     Input("ocb-range", "data"),
@@ -557,6 +585,9 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     hist_wavg = analysis.calc_weighted_dso(st.df_historical)
     pref_wavg = analysis.calc_weighted_dso(st.df_preference)
     diff = (pref_wavg - hist_wavg) / hist_wavg * 100
+    hist_dpd = analysis.calc_weighted_dpd(st.df_historical)
+    pref_dpd = analysis.calc_weighted_dpd(st.df_preference)
+    dpd_diff = (pref_dpd - hist_dpd) / hist_dpd * 100
 
     tot_shares, ord_shares = _ocb_transfer_shares(st)
     net_pref_defenses, total_new_value = analysis.calc_net_pref_defenses(df_nv, tot_shares, ord_shares)
@@ -567,10 +598,13 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
         print(f"OCA identity off by ${abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount):,.2f}")
 
     return (f"${total_transfers:,.2f}", f"${total_new_value:,.2f}", f"${net_new_value:,.2f}",
-            f"${net_pref_defenses:,.2f}",
-            f"{hist_wavg:.2f}", f"{pref_wavg:.2f}", f"{diff:.2f}%",
-            f"${net_pref_defenses:,.2f}", f"${net_pref_defenses:,.2f}", f"${total_transfers:,.2f}", f"${total_new_value:,.2f}",
-            f"${ordinary_course_amount:,.2f}")
+                f"${net_pref_defenses:,.2f}",
+                f"{hist_wavg:.2f}", f"{pref_wavg:.2f}", f"{diff:.2f}%",
+                f"${net_pref_defenses:,.2f}", f"${net_pref_defenses:,.2f}", f"${total_transfers:,.2f}", f"${total_new_value:,.2f}",
+                f"${ordinary_course_amount:,.2f}", f"{diff:.2f}%",
+                "fa-solid fa-arrow-trend-up fa-3x" if diff >= 0 else "fa-solid fa-arrow-trend-down fa-3x",
+                f"{dpd_diff:.2f}%",
+                "fa-solid fa-arrow-trend-up fa-3x" if dpd_diff >= 0 else "fa-solid fa-arrow-trend-down fa-3x")
 
 @callback(
     Output("ocb_grid", "rowData"),
@@ -670,10 +704,6 @@ def _load_subcase_payload(st, subcase_id):
         st.df_preference.to_dict('records'),
         st.df_snv.to_dict('records'),
         st.df_ocb.to_dict('records'),
-        info['hist_title'],
-        info['pref_title'],
-        info['hist_count'],
-        info['pref_count'],
         {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
          'step': info['ocb_step'], 'total': info['ocb_total_flag']},
         st.ocb_metric,
@@ -688,10 +718,6 @@ def _load_subcase_payload(st, subcase_id):
     Output("preference", "rowData"),
     Output("new_value", "rowData", allow_duplicate=True),
     Output("ocb_grid", "rowData", allow_duplicate=True),
-    Output("hist-period-title", "children"),
-    Output("pref-period-title", "children"),
-    Output("hist-period-invoice-count", "children"),
-    Output("pref-period-invoice-count", "children"),
     Output("ocb-restore", "data"),
     Output("ocb-metric", "value", allow_duplicate=True),
     Input("main-selector", "value"),
@@ -707,15 +733,15 @@ def selection_changed(main_id, subcase_id):
         st = session.get_state()
         sub_ids = {o["value"] for o in opts}
         if st.meta and st.meta.get("main_id") == main_id and st.active_subcase_id in sub_ids:
-            return (no_update,) * 13
+            return (no_update,) * 9
         if st.subcase_by_main is None:
             st.subcase_by_main = {}
         target = st.subcase_by_main.get(main_id)
         if target not in sub_ids:
             target = opts[0]["value"] if opts else None
         if target is None:
-            return opts, None, no_update, no_update, no_update, no_update, no_update, \
-                   no_update, no_update, no_update, no_update, no_update, no_update
+            return opts, None, no_update, no_update, no_update, \
+                   no_update, no_update, no_update, no_update
         st.subcase_by_main[main_id] = target
         payload = _load_subcase_payload(st, target)
         return (opts, target) + payload
@@ -725,7 +751,7 @@ def selection_changed(main_id, subcase_id):
 
     st = session.get_state()
     if st.meta and st.meta.get("subcase_id") == subcase_id:
-        return (no_update,) * 13
+        return (no_update,) * 9
     if st.subcase_by_main is None:
         st.subcase_by_main = {}
     st.subcase_by_main[main_id] = subcase_id
@@ -811,29 +837,65 @@ def update_ocb_warning(sel, start, end, step):
         return html.Span("Total ranges broader than 100 days may be unordinary in many jurisdictions.", style={"color": "red", "fontWeight": "bold"})
     return ""
  
+def _stats_table(rows):
+    return dbc.Table(
+        [
+            html.Tbody([
+                html.Tr([
+                    html.Th(label, style={"fontWeight": "600", "width": "55%"}),
+                    html.Td(value),
+                ]) for label, value in rows
+            ])
+        ],
+        size="sm",
+        borderless=True,
+        hover=True,
+        className="mb-0",
+        style={"width": "100%"},
+    )
+
+
 @callback(
-    Output("hist-average_dso", "children"),
-    Output("hist-average_dpd", "children"),
-    Output("hist-weighted_dso", "children"),
-    Output("hist-weighted_dpd", "children"),
-    Output("hist-skew", "children"),
+    Output("hist-stats-table", "children"),
     Input("historical", "rowData"),
     prevent_initial_call=True
 )
- 
-def update_hist_totals(rowData):
+def update_hist_stats(rowData):
     df = pd.DataFrame(rowData)
-    average_dso = df["Invoice to Payment"].mean()
-    average_dpd = df["Days Past Due"].mean()
+    if df.empty:
+        return ""
+    dates = pd.to_datetime(df["Payment Date"])
+    begin = dates.min()
+    end = dates.max()
+    length = relativedelta(end, begin)
+
+    def plural(value, unit):
+        return f"{value} {unit}{'s' if value != 1 else ''}"
+
     weighted_dso = analysis.calc_weighted_dso(df)
-    weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
+    weighted_dpd = analysis.calc_weighted_dpd(df)
     skew = df["Invoice to Payment"].skew()
     if skew > 1 or skew < -1:
         skew_warning = " (Warning: Skew is outside the range of -1 to 1, indicating a non-normal distribution)"
     else:
         skew_warning = ""
-    
-    return f"Historical Period Average DSO: {average_dso:.2f}", f"Historical Period Average DPD: {average_dpd:.2f}", f"Historical Period Weighted DSO: {weighted_dso:.2f}", f"Historical Period Weighted DPD: {weighted_dpd:.2f}", f"Historical Period Skew: {skew:.2f}, {skew_warning}"
+    avg_invoice = df["Invoice Amount"].mean()
+    avg_transfer = df["Transfer Amount"].mean()
+    invoices_per_transfer = df.groupby("Transfer Number").size().mean()
+
+    rows = [
+        ("Beginning of Historical Period", begin.strftime("%m/%d/%Y")),
+        ("Historical Period Length (years, months, days)", f"{plural(length.years, 'year')}, {plural(length.months, 'month')}, {plural(length.days, 'day')}"),
+        ("Number of Invoices in Historical Period", str(len(df))),
+        ("Historical Weighted Average Days Outstanding", f"{weighted_dso:.2f}"),
+        ("Historical Weighted Days Past Due", f"{weighted_dpd:.2f}"),
+        ("Historical Period Skew", f"{skew:.2f}{skew_warning}"),
+        ("Average Amount of Invoices", f"${avg_invoice:,.2f}"),
+        ("Average Amount of Transfers", f"${avg_transfer:,.2f}"),
+        ("Average Number of Invoices Per Transfer", f"{invoices_per_transfer:.2f}"),
+    ]
+
+    return _stats_table(rows)
 
 
 @callback(
@@ -885,24 +947,148 @@ def update_hist_distribution(rowData):
 
 
 @callback(
-    Output("pref-average_dso", "children"),
-    Output("pref-average_dpd", "children"),
-    Output("pref-weighted_dso", "children"),
-    Output("pref-weighted_dpd", "children"),
-    Output("diff-wavg", "children"),
+    Output("pref-distribution-graph", "figure"),
+    Input("preference", "rowData"),
+    prevent_initial_call=True
+)
+def update_pref_distribution(rowData):
+    df = pd.DataFrame(rowData)
+    if df.empty or "Invoice to Payment" not in df:
+        return go.Figure()
+    x = df["Invoice to Payment"].dropna().to_numpy(dtype=float)
+    if x.size == 0:
+        return go.Figure()
+    cap = float(np.ceil(np.quantile(x, 0.99) / 5.0) * 5.0)
+    x = x[x <= cap]
+    if x.size == 0:
+        return go.Figure()
+    n = x.size
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=x,
+        name="Invoice Distribution",
+        xbins={"start": 0, "end": cap, "size": 5},
+        marker={"color": "#3459e6", "line": {"color": "#d8deea", "width": 1}},
+        hovertemplate="Invoice to Payment: %{x} days<br>Number of Invoices: %{y}<extra></extra>"
+    ))
+    fig.update_layout(
+        title={"text": f"Invoice to Payment Distribution ({n} invoices)",
+               "x": 0.0, "font": {"size": 13}},
+        xaxis_title="Invoice to Payment (days)",
+        yaxis_title="Number of Invoices",
+        margin={"l": 50, "r": 20, "t": 50, "b": 45},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#343a40"},
+        showlegend=True,
+        legend={"font": {"color": "#000000"}, "bgcolor": "#ffffff",
+                "borderwidth": 1, "bordercolor": "#adb5bd"},
+        autosize=True,
+    )
+    fig.update_xaxes(
+        showgrid=False, zeroline=False,
+        showline=True, linewidth=1, linecolor="#adb5bd",
+        range=[0, cap],
+    )
+    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#adb5bd")
+    return fig
+
+
+@callback(
+    Output("download-hist-pdf", "data"),
+    Input("export-hist-pdf-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def export_hist_pdf(n_clicks):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.df_historical is None or st.df_historical.empty:
+        raise PreventUpdate
+    transferee = (st.meta.get('transferee') or '').strip() if st.meta else ''
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Historical_Invoices'
+    pdf_bytes = export_pdf.build_invoices_pdf(st.meta, st.df_historical)
+    return dcc.send_bytes(lambda buf: buf.write(pdf_bytes), f"{safe_name}_Historical_Invoices.pdf")
+
+
+@callback(
+    Output("download-hist-excel", "data"),
+    Input("export-hist-excel-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def export_hist_excel(n_clicks):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.df_historical is None or st.df_historical.empty:
+        raise PreventUpdate
+    transferee = (st.meta.get('transferee') or '').strip() if st.meta else ''
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Historical_Invoices'
+    excel_bytes = export_excel.build_invoices_workbook(st.df_historical)
+    return dcc.send_bytes(lambda buf: buf.write(excel_bytes), f"{safe_name}_Historical_Invoices.xlsx")
+
+
+@callback(
+    Output("download-pref-pdf", "data"),
+    Input("export-pref-pdf-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def export_pref_pdf(n_clicks):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.df_preference is None or st.df_preference.empty:
+        raise PreventUpdate
+    transferee = (st.meta.get('transferee') or '').strip() if st.meta else ''
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Preference_Period_Invoices'
+    pdf_bytes = export_pdf.build_invoices_pdf(st.meta, st.df_preference, caption="Preference Period Invoices")
+    return dcc.send_bytes(lambda buf: buf.write(pdf_bytes), f"{safe_name}_Preference_Period_Invoices.pdf")
+
+
+@callback(
+    Output("download-pref-excel", "data"),
+    Input("export-pref-excel-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def export_pref_excel(n_clicks):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.df_preference is None or st.df_preference.empty:
+        raise PreventUpdate
+    transferee = (st.meta.get('transferee') or '').strip() if st.meta else ''
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Preference_Period_Invoices'
+    excel_bytes = export_excel.build_invoices_workbook(st.df_preference, sheet_title="Preference Period Invoices")
+    return dcc.send_bytes(lambda buf: buf.write(excel_bytes), f"{safe_name}_Preference_Period_Invoices.xlsx")
+
+
+@callback(
+    Output("pref-stats-table", "children"),
     Input("preference", "rowData"),
     prevent_initial_call=True
 )
 
-def update_pref_totals(rowData):
+def update_pref_stats(rowData):
     st = session.get_state()
     df = pd.DataFrame(rowData)
-    average_dso = df["Invoice to Payment"].mean()
-    average_dpd = df["Days Past Due"].mean()
+    if df.empty or st.df_historical is None or st.df_historical.empty:
+        return ""
     weighted_dso = analysis.calc_weighted_dso(df)
-    weighted_dpd = df["Days Past Due"].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
-    diff = analysis.compare_hist_pref(st.df_historical, st.df_preference)
-    return f"Preference Period Average DSO: {average_dso:.2f}", f"Preference Period Average DPD: {average_dpd:.2f}", f"Preference Period Weighted DSO: {weighted_dso:.2f}", f"Preference Period Weighted DPD: {weighted_dpd:.2f}", f"Weighted DSO Difference (Historical vs Preference): {diff:.2f}%"
+    weighted_dpd = analysis.calc_weighted_dpd(df)
+    dso_diff = analysis.compare_hist_pref(st.df_historical, df)
+    dpd_diff = analysis.compare_hist_pref(st.df_historical, df, metric="Days Past Due")
+    avg_invoice = df["Invoice Amount"].mean()
+    avg_transfer = df["Transfer Amount"].mean()
+    invoices_per_transfer = df.groupby("Transfer Number").size().mean()
+
+    rows = [
+        ("Number of Invoices in Preference Period", str(len(df))),
+        ("Weighted Average Days Outstanding", f"{weighted_dso:.2f}"),
+        ("Percentage Difference from Historical Weighted Average Days Outstanding", f"{dso_diff:.2f}%"),
+        ("Weighted Average Days Past Due", f"{weighted_dpd:.2f}"),
+        ("Percentage Difference from Historical Weighted Days Past Due", f"{dpd_diff:.2f}%"),
+        ("Average Amount of Invoices", f"${avg_invoice:,.2f}"),
+        ("Average Amount of Transfers", f"${avg_transfer:,.2f}"),
+        ("Number of Invoices Per Transfer", f"{invoices_per_transfer:.2f}"),
+    ]
+
+    return _stats_table(rows)
 
 @callback(
     Output("autosave-status", "children"),
@@ -1251,10 +1437,6 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id):
     Output("preference", "rowData", allow_duplicate=True),
     Output("new_value", "rowData", allow_duplicate=True),
     Output("ocb_grid", "rowData", allow_duplicate=True),
-    Output("hist-period-title", "children", allow_duplicate=True),
-    Output("pref-period-title", "children", allow_duplicate=True),
-    Output("hist-period-invoice-count", "children", allow_duplicate=True),
-    Output("pref-period-invoice-count", "children", allow_duplicate=True),
     Output("ocb-range", "data", allow_duplicate=True),
     Output("ocb-total-range-flag", "data", allow_duplicate=True),
     Output("ocb-ordinary-invoices", "data", allow_duplicate=True),
@@ -1282,10 +1464,6 @@ def session_boot(_):
         st.df_preference.to_dict('records'),
         st.df_snv.to_dict('records'),
         st.df_ocb.to_dict('records'),
-        info['hist_title'],
-        info['pref_title'],
-        info['hist_count'],
-        info['pref_count'],
         info['ocb_range'],
         info['ocb_total_flag'],
         info['ordinary_inv'],
