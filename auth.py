@@ -93,14 +93,14 @@ def guard(*roles):
     return current_user
 
 
-def can_edit_master(user, master_id):
+def can_edit_main(user, main_id):
     if not user.is_authenticated:
         return False
     if user.role == 'admin':
         return True
     if user.role != 'case_manager':
         return False
-    return int(master_id) in {g['master_case_id'] for g in store.master_grants_for(user.id)}
+    return int(main_id) in {g['main_case_id'] for g in store.main_grants_for(user.id)}
 
 
 def can_edit_subcase(user, subcase_id):
@@ -113,12 +113,12 @@ def can_edit_subcase(user, subcase_id):
     sid = int(subcase_id)
     if sid in {g['subcase_id'] for g in store.subcase_grants_for(user.id)}:
         return True
-    master_id = store.get_master_by_subcase(sid)['master_id']
-    return int(master_id) in {g['master_case_id'] for g in store.master_grants_for(user.id)}
+    main_id = store.get_main_by_subcase(sid)['main_id']
+    return int(main_id) in {g['main_case_id'] for g in store.main_grants_for(user.id)}
 
 
-def guard_edit_master(master_id):
-    if not can_edit_master(current_user, master_id):
+def guard_edit_main(main_id):
+    if not can_edit_main(current_user, main_id):
         from dash.exceptions import PreventUpdate
         raise PreventUpdate
 

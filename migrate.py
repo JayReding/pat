@@ -7,7 +7,7 @@ import store
 
 LEGACY_DB = 'pat_test.db'
 
-MASTER_1 = {
+MAIN_1 = {
     'case_name': 'In re ABC Corp.',
     'case_number': '26-10012',
     'jurisdiction': 'Bankruptcy Court of the Southern District of New York',
@@ -43,20 +43,20 @@ def already_seeded():
     return count > 0 or subs > 0
 
 
-def insert_master(conn, data):
+def insert_main(conn, data):
     cur = conn.execute(
-        "INSERT INTO master_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at) "
+        "INSERT INTO main_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         (data['case_name'], data['case_number'], data['jurisdiction'], data['judge'],
          data['petition_date'], now()))
     return cur.lastrowid
 
 
-def insert_subcase(conn, master_id, transferee_name, adversary_number):
+def insert_subcase(conn, main_id, transferee_name, adversary_number):
     cur = conn.execute(
-        "INSERT INTO subcases (master_case_id, transferee_name, adversary_number, created_at) "
+        "INSERT INTO subcases (main_case_id, transferee_name, adversary_number, created_at) "
         "VALUES (?, ?, ?, ?)",
-        (master_id, transferee_name, adversary_number, now()))
+        (main_id, transferee_name, adversary_number, now()))
     return cur.lastrowid
 
 
@@ -150,25 +150,25 @@ def main():
         conn.close()
         return
 
-    master1 = insert_master(conn, MASTER_1)
-    sub1 = insert_subcase(conn, master1, SUBCASE_1['transferee_name'], SUBCASE_1['adversary_number'])
+    main1 = insert_main(conn, MAIN_1)
+    sub1 = insert_subcase(conn, main1, SUBCASE_1['transferee_name'], SUBCASE_1['adversary_number'])
     copy_legacy_rows(conn, sub1)
-    print(f'Seeded master {master1} / subcase {sub1} with {count_rows(sub1)} invoice rows.')
+    print(f'Seeded main case {main1} / subcase {sub1} with {count_rows(sub1)} invoice rows.')
 
     offset = pd.Timedelta(days=700)
-    petition2 = (pd.Timestamp(MASTER_1['petition_date']) + offset).strftime('%Y-%m-%d')
-    master2 = conn.execute(
-        "INSERT INTO master_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at) "
+    petition2 = (pd.Timestamp(MAIN_1['petition_date']) + offset).strftime('%Y-%m-%d')
+    main2 = conn.execute(
+        "INSERT INTO main_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         ('In re Synthetic Corp.', '26-00002', 'Bankruptcy Court of the Southern District of New York',
          'Judge Jane Doe', petition2, now())).lastrowid
-    sub2 = insert_subcase(conn, master2, 'Demo Transferee, LLC', '00-12345')
+    sub2 = insert_subcase(conn, main2, 'Demo Transferee, LLC', '00-12345')
     insert_synthetic_rows(conn, sub2, offset)
-    print(f'Seeded master {master2} / subcase {sub2} with {count_rows(sub2)} invoice rows.')
+    print(f'Seeded main case {main2} / subcase {sub2} with {count_rows(sub2)} invoice rows.')
 
     conn.commit()
     conn.close()
-    print('Preference start derived for subcase 1:', (pd.Timestamp(MASTER_1['petition_date']) - pd.Timedelta(days=90)).strftime('%Y-%m-%d'))
+    print('Preference start derived for subcase 1:', (pd.Timestamp(MAIN_1['petition_date']) - pd.Timedelta(days=90)).strftime('%Y-%m-%d'))
     print('Preference start derived for subcase 2:', (pd.Timestamp(petition2) - pd.Timedelta(days=90)).strftime('%Y-%m-%d'))
 
 

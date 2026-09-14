@@ -21,8 +21,8 @@ store.init_users_db()
 
 
 def load_case(st, subcase_id):
-    master = store.get_master_by_subcase(subcase_id)
-    petition_date = pd.Timestamp(master['petition_date'])
+    main = store.get_main_by_subcase(subcase_id)
+    petition_date = pd.Timestamp(main['petition_date'])
     pref_start = petition_date - pd.Timedelta(days=90)
     s = pref_start.strftime('%Y-%m-%d')
     p = petition_date.strftime('%Y-%m-%d')
@@ -82,19 +82,19 @@ def load_case(st, subcase_id):
     pref_dates = pd.to_datetime(st.df_preference['Payment Date'])
     info = {
         'subcase_id': int(subcase_id),
-        'master_id': master['master_id'],
-        'master_name': master['case_name'],
-        'master_number': master['case_number'],
-        'jurisdiction': master['jurisdiction'],
-        'judge': master['judge'],
+        'main_id': main['main_id'],
+        'main_name': main['case_name'],
+        'main_number': main['case_number'],
+        'jurisdiction': main['jurisdiction'],
+        'judge': main['judge'],
         'petition_date': petition_date.strftime('%m/%d/%Y'),
         'pref_start': pref_start.strftime('%m/%d/%Y'),
-        'transferee': master['transferee'],
-        'adversary_number': master['adversary_number'] or '',
-        'file_number': master['file_number'] or '',
-        'filing_date': master['filing_date'] or '',
-        'subcase_display': (master['adversary_number'] or '') if master['filing_date'] else (master['file_number'] or ''),
-        'subcase_id_label': 'Adversary Number' if master['filing_date'] else 'File Number',
+        'transferee': main['transferee'],
+        'adversary_number': main['adversary_number'] or '',
+        'file_number': main['file_number'] or '',
+        'filing_date': main['filing_date'] or '',
+        'subcase_display': (main['adversary_number'] or '') if main['filing_date'] else (main['file_number'] or ''),
+        'subcase_id_label': 'Adversary Number' if main['filing_date'] else 'File Number',
         'hist_title': f'Historical Period: {hist_dates.min().strftime("%m/%d/%Y")} through {hist_dates.max().strftime("%m/%d/%Y")}',
         'pref_title': f'Preference Period: {s} through {p}',
         'hist_count': f'Historical Period Invoice Count: {len(hist_dates)}',
@@ -150,13 +150,13 @@ def _analysis_page():
         "border": "1px solid var(--bs-border-color)",
         "backgroundColor": "var(--bs-tertiary-bg)",
     }, children=[
-        html.Div(id="master-info", children=[]),
+        html.Div(id="main-info", children=[]),
         html.Div(style={"display": "flex", "gap": "16px", "alignItems": "flex-end", "flexWrap": "wrap"}, children=[
             html.Div(children=[
-                html.Label('Master Bankruptcy Case', htmlFor="master-selector"),
+                html.Label('Main Bankruptcy Case', htmlFor="main-selector"),
                 dcc.Dropdown(
-                    id="master-selector",
-                    options=store.list_master_options(),
+                    id="main-selector",
+                    options=store.list_main_options(),
                     value=None,
                     clearable=False,
                     style={"width": "300px"},
@@ -366,7 +366,7 @@ def _manage_page():
         dcc.Tabs([
             dcc.Tab(label='Case Management', children=[
                 html.H3(children='Case Management'),
-                dcc.Dropdown(id="cm-master", options=store.list_master_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+                dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
                 html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
                     html.Label('Case Name', htmlFor="cm-case-name"), dcc.Input(id="cm-case-name", type="text", className="form-control"),
                 ]),
@@ -452,13 +452,13 @@ def _manage_page():
                 html.Div(id="admin-status", className="mt-3"),
                 html.Hr(),
                 html.H6('Case Access (grants)'),
-                html.P('Grant a user access to a master case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
+                html.P('Grant a user access to a main case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
                 html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
                     html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
-                    html.Div(children=[html.Label('Master case', htmlFor="grant-master"), dcc.Dropdown(id="grant-master", options=store.list_master_options(), style={"minWidth": "260px"})]),
+                    html.Div(children=[html.Label('Main case', htmlFor="grant-main"), dcc.Dropdown(id="grant-main", options=store.list_main_options(), style={"minWidth": "260px"})]),
                     html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
-                    dbc.Button("Grant Master", id="grant-master-btn", color="secondary"),
-                    dbc.Button("Revoke Master", id="revoke-master-btn", color="secondary"),
+                    dbc.Button("Grant Main Case", id="grant-main-btn", color="secondary"),
+                    dbc.Button("Revoke Main Case", id="revoke-main-btn", color="secondary"),
                     dbc.Button("Grant Subcase", id="grant-subcase-btn", color="secondary"),
                     dbc.Button("Revoke Subcase", id="revoke-subcase-btn", color="danger"),
                 ]),
@@ -468,7 +468,7 @@ def _manage_page():
                     columnDefs=[
                         {"field": "username", "headerName": "User"},
                         {"field": "level", "headerName": "Level"},
-                        {"field": "master_case_id", "headerName": "Master ID"},
+                        {"field": "main_case_id", "headerName": "Main Case ID"},
                         {"field": "subcase_id", "headerName": "Subcase ID"},
                     ],
                 ),
@@ -660,12 +660,12 @@ def _load_subcase_payload(st, subcase_id):
     info = load_case(st, subcase_id)
     store.save_app_state(subcase_id)
     st = session.get_state()
-    master_info = [
+    main_info = [
         html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
-        html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
+        html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
     ]
     return (
-        master_info,
+        main_info,
         st.df_historical.to_dict('records'),
         st.df_preference.to_dict('records'),
         st.df_snv.to_dict('records'),
@@ -683,7 +683,7 @@ def _load_subcase_payload(st, subcase_id):
 @callback(
     Output("subcase-selector", "options"),
     Output("subcase-selector", "value"),
-    Output("master-info", "children"),
+    Output("main-info", "children"),
     Output("historical", "rowData"),
     Output("preference", "rowData"),
     Output("new_value", "rowData", allow_duplicate=True),
@@ -694,29 +694,29 @@ def _load_subcase_payload(st, subcase_id):
     Output("pref-period-invoice-count", "children"),
     Output("ocb-restore", "data"),
     Output("ocb-metric", "value", allow_duplicate=True),
-    Input("master-selector", "value"),
+    Input("main-selector", "value"),
     Input("subcase-selector", "value"),
     prevent_initial_call=True
 )
-def selection_changed(master_id, subcase_id):
+def selection_changed(main_id, subcase_id):
     trig = dash.callback_context.triggered[0]["prop_id"]
     no_update = dash.no_update
 
-    if trig == "master-selector.value":
-        opts = store.list_subcase_options(master_id)
+    if trig == "main-selector.value":
+        opts = store.list_subcase_options(main_id)
         st = session.get_state()
         sub_ids = {o["value"] for o in opts}
-        if st.meta and st.meta.get("master_id") == master_id and st.active_subcase_id in sub_ids:
+        if st.meta and st.meta.get("main_id") == main_id and st.active_subcase_id in sub_ids:
             return (no_update,) * 13
-        if st.subcase_by_master is None:
-            st.subcase_by_master = {}
-        target = st.subcase_by_master.get(master_id)
+        if st.subcase_by_main is None:
+            st.subcase_by_main = {}
+        target = st.subcase_by_main.get(main_id)
         if target not in sub_ids:
             target = opts[0]["value"] if opts else None
         if target is None:
             return opts, None, no_update, no_update, no_update, no_update, no_update, \
                    no_update, no_update, no_update, no_update, no_update, no_update
-        st.subcase_by_master[master_id] = target
+        st.subcase_by_main[main_id] = target
         payload = _load_subcase_payload(st, target)
         return (opts, target) + payload
 
@@ -726,9 +726,9 @@ def selection_changed(master_id, subcase_id):
     st = session.get_state()
     if st.meta and st.meta.get("subcase_id") == subcase_id:
         return (no_update,) * 13
-    if st.subcase_by_master is None:
-        st.subcase_by_master = {}
-    st.subcase_by_master[master_id] = subcase_id
+    if st.subcase_by_main is None:
+        st.subcase_by_main = {}
+    st.subcase_by_main[main_id] = subcase_id
     payload = _load_subcase_payload(st, subcase_id)
     return (no_update, no_update) + payload
 
@@ -1054,14 +1054,14 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
     Output("cm-petition-date", "disabled"),
     Output("cm-save", "disabled"),
     Output("cm-subcase-list", "children"),
-    Input("cm-master", "value"),
+    Input("cm-main", "value"),
 )
-def build_cm_details(master_id):
-    if master_id is None:
-        return (None,) * 5 + (True,) * 6 + (html.P("Select a master case to view or edit its details.", className="text-muted"),)
-    m = store.get_master_by_id(master_id)
-    subs = store.list_subcase_options(master_id)
-    can_edit = auth.can_edit_master(auth.current_user, master_id)
+def build_cm_details(main_id):
+    if main_id is None:
+        return (None,) * 5 + (True,) * 6 + (html.P("Select a main case to view or edit its details.", className="text-muted"),)
+    m = store.get_main_by_id(main_id)
+    subs = store.list_subcase_options(main_id)
+    can_edit = auth.can_edit_main(auth.current_user, main_id)
     sub_list = html.Div(children=[
         html.Strong(f"Subcases ({len(subs)}):"),
         html.Ul(children=[html.Li(s["label"]) for s in subs]),
@@ -1100,12 +1100,12 @@ _SUBCASE_FIELD_DEFS = [
 @callback(
     Output("cm-subcase", "options"),
     Output("cm-subcase", "value"),
-    Input("cm-master", "value"),
+    Input("cm-main", "value"),
 )
-def populate_cm_subcase(master_id):
-    if master_id is None:
+def populate_cm_subcase(main_id):
+    if main_id is None:
         return [], None
-    opts = store.list_subcase_options(master_id)
+    opts = store.list_subcase_options(main_id)
     return opts, opts[0]["value"] if opts else None
 
 
@@ -1180,7 +1180,7 @@ def save_subcase(n,
 @callback(
     Output("cm-status", "children"),
     Input("cm-save", "n_clicks"),
-    State("cm-master", "value"),
+    State("cm-main", "value"),
     State("cm-case-name", "value"),
     State("cm-case-number", "value"),
     State("cm-jurisdiction", "value"),
@@ -1188,12 +1188,12 @@ def save_subcase(n,
     State("cm-petition-date", "value"),
     prevent_initial_call=True
 )
-def save_master(n_clicks, master_id, name, number, jurisdiction, judge, petition):
-    if master_id is None:
-        return dbc.Alert("Select a master case first.", color="warning")
-    auth.guard_edit_master(master_id)
+def save_main(n_clicks, main_id, name, number, jurisdiction, judge, petition):
+    if main_id is None:
+        return dbc.Alert("Select a main case first.", color="warning")
+    auth.guard_edit_main(main_id)
     try:
-        store.update_master_case(master_id, name, number, jurisdiction, judge, petition)
+        store.update_main_case(main_id, name, number, jurisdiction, judge, petition)
         return dbc.Alert("Saved.", color="success")
     except ValueError as e:
         return dbc.Alert(str(e), color="danger")
@@ -1202,35 +1202,35 @@ def save_master(n_clicks, master_id, name, number, jurisdiction, judge, petition
 @callback(
     Output("grant-subcase", "options"),
     Output("grant-subcase", "value"),
-    Input("grant-master", "value"),
+    Input("grant-main", "value"),
 )
-def grant_subcase_options(master_id):
-    if master_id is None:
+def grant_subcase_options(main_id):
+    if main_id is None:
         return [], None
-    return store.list_subcase_options(master_id), None
+    return store.list_subcase_options(main_id), None
 
 
 @callback(
     Output("grants-grid", "rowData"),
     Output("grant-status", "children"),
-    Input("grant-master-btn", "n_clicks"),
-    Input("revoke-master-btn", "n_clicks"),
+    Input("grant-main-btn", "n_clicks"),
+    Input("revoke-main-btn", "n_clicks"),
     Input("grant-subcase-btn", "n_clicks"),
     Input("revoke-subcase-btn", "n_clicks"),
     State("grant-user", "value"),
-    State("grant-master", "value"),
+    State("grant-main", "value"),
     State("grant-subcase", "value"),
     prevent_initial_call=True
 )
-def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, master_id, subcase_id):
+def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id):
     auth.guard("admin")
     trig = dash.callback_context.triggered_id
-    if trig == "grant-master-btn" and user_id is not None and master_id is not None:
-        store.grant_master(user_id, master_id)
-        status = "Granted master access (covers all its subcases)."
-    elif trig == "revoke-master-btn" and user_id is not None and master_id is not None:
-        store.revoke_master(user_id, master_id)
-        status = "Revoked master access."
+    if trig == "grant-main-btn" and user_id is not None and main_id is not None:
+        store.grant_main(user_id, main_id)
+        status = "Granted main case access (covers all its subcases)."
+    elif trig == "revoke-main-btn" and user_id is not None and main_id is not None:
+        store.revoke_main(user_id, main_id)
+        status = "Revoked main case access."
     elif trig == "grant-subcase-btn" and user_id is not None and subcase_id is not None:
         store.grant_subcase(user_id, subcase_id)
         status = "Granted subcase access."
@@ -1243,8 +1243,8 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, master_id, subcase_id):
 
 
 @callback(
-    Output("master-info", "children", allow_duplicate=True),
-    Output("master-selector", "value", allow_duplicate=True),
+    Output("main-info", "children", allow_duplicate=True),
+    Output("main-selector", "value", allow_duplicate=True),
     Output("subcase-selector", "options", allow_duplicate=True),
     Output("subcase-selector", "value", allow_duplicate=True),
     Output("historical", "rowData", allow_duplicate=True),
@@ -1269,14 +1269,14 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, master_id, subcase_id):
 def session_boot(_):
     st = session.get_state()
     info = st.meta
-    master_info = [
+    main_info = [
         html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
-        html.Div(f"Main Case: {info['master_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
+        html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
     ]
     return (
-        master_info,
-        info['master_id'],
-        store.list_subcase_options(info['master_id']),
+        main_info,
+        info['main_id'],
+        store.list_subcase_options(info['main_id']),
         info['subcase_id'],
         st.df_historical.to_dict('records'),
         st.df_preference.to_dict('records'),

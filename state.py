@@ -15,5 +15,5 @@ class CaseState:
     df_ocb: Any = None
     loaded: bool = False
     meta: Any = None
-    subcase_by_master: Any = None
+    subcase_by_main: Any = None
     ocb_metric: str = "Invoice to Payment"

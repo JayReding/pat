@@ -97,9 +97,9 @@ def _get_user(args):
     return user
 
 
-def _get_master(args):
+def _get_main(args):
     try:
-        return store.get_master_by_id(args.master_id)
+        return store.get_main_by_id(args.main_id)
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -113,23 +113,23 @@ def cmds_grants(args):
         print(f"No grants for '{args.username}'.")
         return
     fmt = "{:<8} {:<10} {}"
-    print(fmt.format("Level", "Master ID", "Subcase ID"))
+    print(fmt.format("Level", "Main ID", "Subcase ID"))
     print("-" * 40)
     for g in mine:
-        print(fmt.format(g['level'], g['master_case_id'] or '-', g['subcase_id'] or '-'))
+        print(fmt.format(g['level'], g['main_case_id'] or '-', g['subcase_id'] or '-'))
 
 
-def cmd_grant_master(args):
+def cmd_grant_main(args):
     user = _get_user(args)
-    _get_master(args)
-    store.grant_master(user['id'], args.master_id)
-    print(f"Granted '{args.username}' master case {args.master_id} (covers its subcases).")
+    _get_main(args)
+    store.grant_main(user['id'], args.main_id)
+    print(f"Granted '{args.username}' main case {args.main_id} (covers its subcases).")
 
 
-def cmd_revoke_master(args):
+def cmd_revoke_main(args):
     user = _get_user(args)
-    store.revoke_master(user['id'], args.master_id)
-    print(f"Revoked master case {args.master_id} from '{args.username}'.")
+    store.revoke_main(user['id'], args.main_id)
+    print(f"Revoked main case {args.main_id} from '{args.username}'.")
 
 
 def cmd_grant_subcase(args):
@@ -178,15 +178,15 @@ def main():
     p_del.add_argument('-y', '--yes', action='store_true', help='Skip confirmation')
     p_del.set_defaults(func=cmd_delete)
 
-    p_gm = subs.add_parser('grant-master', help='Grant a master case to a user')
+    p_gm = subs.add_parser('grant-main', help='Grant a main case to a user')
     p_gm.add_argument('username')
-    p_gm.add_argument('master_id', type=int)
-    p_gm.set_defaults(func=cmd_grant_master)
+    p_gm.add_argument('main_id', type=int)
+    p_gm.set_defaults(func=cmd_grant_main)
 
-    p_rm = subs.add_parser('revoke-master', help='Revoke a master case from a user')
+    p_rm = subs.add_parser('revoke-main', help='Revoke a main case from a user')
     p_rm.add_argument('username')
-    p_rm.add_argument('master_id', type=int)
-    p_rm.set_defaults(func=cmd_revoke_master)
+    p_rm.add_argument('main_id', type=int)
+    p_rm.set_defaults(func=cmd_revoke_main)
 
     p_gs = subs.add_parser('grant-subcase', help='Grant a single subcase to a user')
     p_gs.add_argument('username')
@@ -206,6 +206,8 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(1)
+    store.init_users_db()
+    store.init_cases_db()
     args.func(args)
 
 

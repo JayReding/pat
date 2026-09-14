@@ -17,10 +17,21 @@ def _connect_state():
     return sqlite3.connect(STATE_DB)
 
 
+def _migrate_main_case_names(conn):
+    row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='master_cases'").fetchone()
+    if row is not None:
+        conn.execute("ALTER TABLE master_cases RENAME TO main_cases")
+    subcols = {r[1] for r in conn.execute("PRAGMA table_info(subcases)").fetchall()}
+    if 'master_case_id' in subcols:
+        conn.execute("ALTER TABLE subcases RENAME COLUMN master_case_id TO main_case_id")
+    conn.commit()
+
+
 def init_cases_db():
     conn = _connect_cases()
+    _migrate_main_case_names(conn)
     conn.executescript('''
-        CREATE TABLE IF NOT EXISTS master_cases (
+        CREATE TABLE IF NOT EXISTS main_cases (
             id             INTEGER PRIMARY KEY,
             case_name      TEXT    NOT NULL UNIQUE,
             case_number    TEXT    NOT NULL,
@@ -31,12 +42,12 @@ def init_cases_db():
         );
         CREATE TABLE IF NOT EXISTS subcases (
             id                INTEGER PRIMARY KEY,
-            master_case_id    INTEGER NOT NULL REFERENCES master_cases(id) ON DELETE CASCADE,
+            main_case_id      INTEGER NOT NULL REFERENCES main_cases(id) ON DELETE CASCADE,
             transferee_name   TEXT    NOT NULL,
             adversary_number  TEXT,
             created_at        TEXT    NOT NULL,
             meta              TEXT,
-            UNIQUE(master_case_id, adversary_number)
+            UNIQUE(main_case_id, adversary_number)
         );
         CREATE TABLE IF NOT EXISTS invoice_records (
             id                  INTEGER PRIMARY KEY,
@@ -117,7 +128,7 @@ def _display_number(adversary_number, filing_date, file_number):
 def get_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute(
-        "SELECT id, master_case_id, transferee_name, adversary_number, file_number, filing_date, meta "
+        "SELECT id, main_case_id, transferee_name, adversary_number, file_number, filing_date, meta "
         "FROM subcases WHERE id = ?", (int(subcase_id),)
     ).fetchone()
     conn.close()
@@ -126,7 +137,7 @@ def get_subcase(subcase_id):
     meta = json.loads(row[6]) if row[6] else {}
     result = {
         'id': row[0],
-        'master_case_id': row[1],
+        'main_case_id': row[1],
         'transferee_name': row[2],
         'adversary_number': row[3] or '',
         'file_number': row[4] or '',
@@ -231,27 +242,27 @@ def subcase_exists(subcase_id):
     return bool(row[0])
 
 
-def list_master_options():
+def list_main_options():
     conn = _connect_cases()
     rows = conn.execute('''
         SELECT id, case_name, case_number
-        FROM master_cases
+        FROM main_cases
         ORDER BY id
     ''').fetchall()
     conn.close()
     return [{"label": f"{name} (#{number})", "value": mid} for mid, name, number in rows]
 
 
-def list_subcase_options(master_id=None):
+def list_subcase_options(main_id=None):
     conn = _connect_cases()
     sql = '''
         SELECT s.id, s.transferee_name, s.adversary_number, s.file_number, s.filing_date
         FROM subcases s
     '''
     params = ()
-    if master_id is not None:
-        sql += ' WHERE s.master_case_id = ?'
-        params = (int(master_id),)
+    if main_id is not None:
+        sql += ' WHERE s.main_case_id = ?'
+        params = (int(main_id),)
     sql += ' ORDER BY s.id'
     rows = conn.execute(sql, params).fetchall()
     conn.close()
@@ -263,19 +274,19 @@ def list_subcase_options(master_id=None):
     return options
 
 
-def get_master_by_subcase(subcase_id):
+def get_main_by_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute('''
         SELECT m.id, m.case_name, m.case_number, m.jurisdiction, m.judge, m.petition_date,
                s.transferee_name, s.adversary_number, s.file_number, s.filing_date
-        FROM subcases s JOIN master_cases m ON m.id = s.master_case_id
+        FROM subcases s JOIN main_cases m ON m.id = s.main_case_id
         WHERE s.id = ?
     ''', (int(subcase_id),)).fetchone()
     conn.close()
     if row is None:
         raise ValueError(f"No subcase with id {subcase_id}")
     return {
-        'master_id': row[0],
+        'main_id': row[0],
         'case_name': row[1],
         'case_number': row[2],
         'jurisdiction': row[3],
@@ -374,8 +385,19 @@ def _connect_users():
     return conn
 
 
+def _migrate_main_grant_names(conn):
+    row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='master_grants'").fetchone()
+    if row is not None:
+        conn.execute("ALTER TABLE master_grants RENAME TO main_grants")
+    cols = {c[1] for c in conn.execute("PRAGMA table_info(main_grants)").fetchall()}
+    if 'master_case_id' in cols:
+        conn.execute("ALTER TABLE main_grants RENAME COLUMN master_case_id TO main_case_id")
+    conn.commit()
+
+
 def init_users_db():
     conn = _connect_users()
+    _migrate_main_grant_names(conn)
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS users (
             id            INTEGER PRIMARY KEY,
@@ -386,10 +408,10 @@ def init_users_db():
             active        INTEGER NOT NULL DEFAULT 1,
             created_at    TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS master_grants (
+        CREATE TABLE IF NOT EXISTS main_grants (
             user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            master_case_id  INTEGER NOT NULL,
-            PRIMARY KEY (user_id, master_case_id)
+            main_case_id    INTEGER NOT NULL,
+            PRIMARY KEY (user_id, main_case_id)
         );
         CREATE TABLE IF NOT EXISTS subcase_grants (
             user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -466,22 +488,22 @@ def reset_user_password(user_id, password_hash):
 
 def delete_user(user_id):
     conn = _connect_users()
-    conn.execute("DELETE FROM master_grants WHERE user_id = ?", (int(user_id),))
+    conn.execute("DELETE FROM main_grants WHERE user_id = ?", (int(user_id),))
     conn.execute("DELETE FROM subcase_grants WHERE user_id = ?", (int(user_id),))
     conn.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
     conn.commit()
     conn.close()
 
 
-def get_master_by_id(master_id):
+def get_main_by_id(main_id):
     conn = _connect_cases()
     row = conn.execute(
         "SELECT id, case_name, case_number, jurisdiction, judge, petition_date, created_at "
-        "FROM master_cases WHERE id = ?", (int(master_id),)
+        "FROM main_cases WHERE id = ?", (int(main_id),)
     ).fetchone()
     conn.close()
     if row is None:
-        raise ValueError(f"No master case with id {master_id}")
+        raise ValueError(f"No main case with id {main_id}")
     return {
         'id': row[0],
         'case_name': row[1],
@@ -493,7 +515,7 @@ def get_master_by_id(master_id):
     }
 
 
-def update_master_case(master_id, case_name, case_number, jurisdiction, judge, petition_date):
+def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petition_date):
     from datetime import datetime
     name = (case_name or '').strip()
     number = (case_number or '').strip()
@@ -509,32 +531,32 @@ def update_master_case(master_id, case_name, case_number, jurisdiction, judge, p
     conn = _connect_cases()
     try:
         conn.execute(
-            "UPDATE master_cases SET case_name=?, case_number=?, jurisdiction=?, judge=?, petition_date=? "
+            "UPDATE main_cases SET case_name=?, case_number=?, jurisdiction=?, judge=?, petition_date=? "
             "WHERE id=?",
-            (name, number, jurisdiction, judge, petition, int(master_id)),
+            (name, number, jurisdiction, judge, petition, int(main_id)),
         )
         conn.commit()
     except sqlite3.IntegrityError:
-        raise ValueError(f"A master case named '{name}' already exists.")
+        raise ValueError(f"A main case named '{name}' already exists.")
     finally:
         conn.close()
 
 
-def grant_master(user_id, master_case_id):
+def grant_main(user_id, main_case_id):
     conn = _connect_users()
     conn.execute(
-        "INSERT OR IGNORE INTO master_grants (user_id, master_case_id) VALUES (?, ?)",
-        (int(user_id), int(master_case_id)),
+        "INSERT OR IGNORE INTO main_grants (user_id, main_case_id) VALUES (?, ?)",
+        (int(user_id), int(main_case_id)),
     )
     conn.commit()
     conn.close()
 
 
-def revoke_master(user_id, master_case_id):
+def revoke_main(user_id, main_case_id):
     conn = _connect_users()
     conn.execute(
-        "DELETE FROM master_grants WHERE user_id = ? AND master_case_id = ?",
-        (int(user_id), int(master_case_id)),
+        "DELETE FROM main_grants WHERE user_id = ? AND main_case_id = ?",
+        (int(user_id), int(main_case_id)),
     )
     conn.commit()
     conn.close()
@@ -560,13 +582,13 @@ def revoke_subcase(user_id, subcase_id):
     conn.close()
 
 
-def master_grants_for(user_id):
+def main_grants_for(user_id):
     conn = _connect_users()
     rows = conn.execute(
-        "SELECT master_case_id FROM master_grants WHERE user_id = ?", (int(user_id),)
+        "SELECT main_case_id FROM main_grants WHERE user_id = ?", (int(user_id),)
     ).fetchall()
     conn.close()
-    return [{'master_case_id': r[0]} for r in rows]
+    return [{'main_case_id': r[0]} for r in rows]
 
 
 def subcase_grants_for(user_id):
@@ -582,15 +604,15 @@ def list_all_grants():
     conn = _connect_users()
     rows = conn.execute(
         'SELECT * FROM ('
-        'SELECT mg.user_id, u.username, mg.master_case_id, NULL AS subcase_id, "master" AS level '
-        'FROM master_grants mg JOIN users u ON u.id = mg.user_id '
+        'SELECT mg.user_id, u.username, mg.main_case_id, NULL AS subcase_id, "main" AS level '
+        'FROM main_grants mg JOIN users u ON u.id = mg.user_id '
         'UNION ALL '
         'SELECT sg.user_id, u.username, NULL, sg.subcase_id, "subcase" AS level '
         'FROM subcase_grants sg JOIN users u ON u.id = sg.user_id'
-        ') ORDER BY username, level, COALESCE(master_case_id, subcase_id)'
+        ') ORDER BY username, level, COALESCE(main_case_id, subcase_id)'
     ).fetchall()
     conn.close()
     return [
-        {'user_id': r[0], 'username': r[1], 'master_case_id': r[2], 'subcase_id': r[3], 'level': r[4]}
+        {'user_id': r[0], 'username': r[1], 'main_case_id': r[2], 'subcase_id': r[3], 'level': r[4]}
         for r in rows
     ]

@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 CASES_DB = 'pat_cases.db'
-MASTER_CASE_ID = 1
+MAIN_CASE_ID = 1
 SOURCE_SUBCASE_ID = 1
 NAME = 'Bobs Widgets'
 ADVERSARY_NUMBER = '26-10056'
@@ -102,16 +102,16 @@ def main():
     conn = sqlite3.connect(CASES_DB)
     cur = conn.cursor()
 
-    master = cur.execute(
-        'SELECT id, case_name, petition_date FROM master_cases WHERE id = ?',
-        (MASTER_CASE_ID,)).fetchone()
-    if master is None:
-        raise SystemExit(f'Master case {MASTER_CASE_ID} not found')
-    petition_date = master[2]
+    main = cur.execute(
+        'SELECT id, case_name, petition_date FROM main_cases WHERE id = ?',
+        (MAIN_CASE_ID,)).fetchone()
+    if main is None:
+        raise SystemExit(f'Main case {MAIN_CASE_ID} not found')
+    petition_date = main[2]
 
     cur.execute(
-        'SELECT id FROM subcases WHERE master_case_id = ? AND transferee_name = ?',
-        (MASTER_CASE_ID, NAME))
+        'SELECT id FROM subcases WHERE main_case_id = ? AND transferee_name = ?',
+        (MAIN_CASE_ID, NAME))
     existing = cur.fetchone()
     if existing and not args.force:
         print(f'{NAME} already exists (subcase id {existing[0]}); skipping. Use --force to regenerate.')
@@ -122,9 +122,9 @@ def main():
         print(f'Removed existing {NAME} (subcase id {existing[0]})')
 
     cur.execute(
-        'INSERT INTO subcases (master_case_id, transferee_name, adversary_number, created_at, meta) '
+        'INSERT INTO subcases (main_case_id, transferee_name, adversary_number, created_at, meta) '
         'VALUES (?, ?, ?, ?, ?)',
-        (MASTER_CASE_ID, NAME, ADVERSARY_NUMBER, datetime.now(timezone.utc).isoformat(), '{}'))
+        (MAIN_CASE_ID, NAME, ADVERSARY_NUMBER, datetime.now(timezone.utc).isoformat(), '{}'))
     new_subcase_id = cur.lastrowid
 
     source_rows = cur.execute(
