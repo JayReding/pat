@@ -656,7 +656,6 @@ def _account_page():
         dcc.Store(id="account-boot", data=True),
         dcc.Store(id="account-avatar-color", data=None),
         dcc.Store(id="account-save-trigger", data=0),
-        dcc.Store(id="account-saved", data=None),
         html.Hr(),
         dbc.Row([
             _manage_sidebar("account"),
@@ -686,6 +685,7 @@ def _shell():
                     ),
                     html.Div(className="ms-auto d-flex align-items-center gap-3", children=[
                         dcc.Store(id="shell-boot", data=True),
+                        dcc.Store(id="account-saved", data=None),
                         html.Div(id="user-badge", className="navbar-text text-white-50"),
                         html.Form(dbc.Button("Log out", color="light", size="sm", className="px-3"),
                                   action="/logout", method="POST"),
