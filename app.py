@@ -1,4 +1,5 @@
 # Import packages
+import json
 import os
 from dash import Dash, html, dcc, callback, Output, Input, State
 from dash.exceptions import PreventUpdate
@@ -21,6 +22,38 @@ import session
 store.init_cases_db()
 store.init_state_db()
 store.init_users_db()
+
+_COURTS = json.load(open('courts.json'))
+COURT_OPTIONS = sorted(
+    ({"label": c["Name"], "value": c["Name"]} for c in _COURTS),
+    key=lambda o: o["label"].lower(),
+)
+
+_STATES = json.load(open('states.json'))
+STATE_OPTIONS = sorted(_STATES.values(), key=str.lower)
+STATE_SET = set(STATE_OPTIONS)
+CUSTOM_STATE_KEY = "__type_your_own__"
+
+
+def _db_custom_states():
+    conn = store._connect_cases()
+    try:
+        rows = conn.execute("SELECT meta FROM subcases").fetchall()
+    finally:
+        conn.close()
+    extras = set()
+    for (m,) in rows:
+        meta = json.loads(m or '{}')
+        for key in ('contact_state', 'attorney_state'):
+            v = meta.get(key)
+            if v and v not in STATE_SET and v != CUSTOM_STATE_KEY:
+                extras.add(v)
+    return extras
+
+
+def _state_options_for(extra):
+    values = sorted(set(STATE_OPTIONS) | set(extra or []), key=str.lower)
+    return values + [{"label": "✏️ Type your own state…", "value": CUSTOM_STATE_KEY}]
 
 
 def load_case(st, subcase_id):
@@ -373,9 +406,22 @@ dcc.Tab(label='Historical Period', children=[
 
 
 def _cm_field(label, cid, ftype="text"):
-    return html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-        html.Label(label, htmlFor=cid),
-        dcc.Input(id=cid, type=ftype, className="form-control"),
+    return html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+        html.Label(label, htmlFor=cid, style={"fontWeight": "600"}),
+        dbc.Input(id=cid, type=ftype, className="form-control",
+                  style={"height": "50px", "fontSize": "1rem"}),
+    ])
+
+
+def _cm_state_field(label, cid, cid_custom, cid_wrap):
+    return html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+        html.Label(label, htmlFor=cid, style={"fontWeight": "600"}),
+        dcc.Dropdown(id=cid, options=_state_options_for(_db_custom_states()),
+                     clearable=False, searchable=True, style={"fontSize": "1rem"}),
+        html.Div(id=cid_wrap, style={"display": "none", "marginTop": "4px"}, children=[
+            dbc.Input(id=cid_custom, className="form-control",
+                      style={"height": "50px", "fontSize": "1rem"}),
+        ]),
     ])
 
 
@@ -400,7 +446,7 @@ def _manage_sidebar(active):
 
 
 def _maincase_page():
-    return html.Div(style={"padding": "20px"}, children=[
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
         _manage_header(),
         dcc.Store(id="manage-boot", data=True),
         html.Hr(),
@@ -408,10 +454,14 @@ def _maincase_page():
             _manage_sidebar("main"),
             dbc.Col(width=10, children=[
                 html.H3(children='Main Case Management'),
-                dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+                dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 _cm_field('Case Name', "cm-case-name"),
                 _cm_field('Case Number', "cm-case-number"),
-                _cm_field('Jurisdiction', "cm-jurisdiction"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label('Jurisdiction', htmlFor="cm-jurisdiction", style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="cm-jurisdiction", options=COURT_OPTIONS, clearable=False, searchable=True,
+                                 style={"height": "50px", "fontSize": "1rem"}),
+                ]),
                 _cm_field('Judge', "cm-judge"),
                 _cm_field('Petition Date (YYYY-MM-DD)', "cm-petition-date", "date"),
                 dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
@@ -422,7 +472,7 @@ def _maincase_page():
 
 
 def _subcase_page():
-    return html.Div(style={"padding": "20px"}, children=[
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
         _manage_header(),
         dcc.Store(id="manage-boot", data=True),
         html.Hr(),
@@ -430,9 +480,9 @@ def _subcase_page():
             _manage_sidebar("subcase"),
             dbc.Col(width=10, children=[
                 html.H3(children='Subcase Management'),
-                dcc.Dropdown(id="sc-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+                dcc.Dropdown(id="sc-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 html.H5('Subcase Details', className="mt-3"),
-                dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "420px", "marginBottom": "16px"}),
+                dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
                 _cm_field('Filing Date (YYYY-MM-DD)', "sc-filing-date", "date"),
                 html.H6('Contact', className="mt-3"),
@@ -441,7 +491,7 @@ def _subcase_page():
                 _cm_field('Contact Address 2', "sc-contact-address2"),
                 html.Div(className="d-flex flex-wrap gap-2", children=[
                     _cm_field('City', "sc-contact-city"),
-                    _cm_field('State', "sc-contact-state"),
+                    _cm_state_field('State', "sc-contact-state", "sc-contact-state-custom", "sc-contact-state-custom-wrap"),
                     _cm_field('ZIP', "sc-contact-zip"),
                 ]),
                 _cm_field('Contact Phone', "sc-contact-phone"),
@@ -453,7 +503,7 @@ def _subcase_page():
                 _cm_field('Attorney Address 2', "sc-attorney-address2"),
                 html.Div(className="d-flex flex-wrap gap-2", children=[
                     _cm_field('City', "sc-attorney-city"),
-                    _cm_field('State', "sc-attorney-state"),
+                    _cm_state_field('State', "sc-attorney-state", "sc-attorney-state-custom", "sc-attorney-state-custom-wrap"),
                     _cm_field('ZIP', "sc-attorney-zip"),
                 ]),
                 _cm_field('Attorney Phone', "sc-attorney-phone"),
@@ -466,7 +516,7 @@ def _subcase_page():
 
 
 def _users_page():
-    return html.Div(style={"padding": "20px"}, children=[
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
         _manage_header(),
         dcc.Store(id="manage-boot", data=True),
         dcc.Store(id="users-boot", data=True),
@@ -558,6 +608,7 @@ def _shell():
     ])
 
 
+dash.register_page("analysis", path="/", layout=_analysis_page(), title="Preference Analysis Tool", name="Analysis")
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
 dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
@@ -1324,17 +1375,38 @@ def populate_sc_subcase(main_id):
 
 @callback(
     [Output(cid, "value") for cid, _ in _SC_SUBCASE_FIELD_DEFS] +
-    [Output(cid, "disabled") for cid, _ in _SC_SUBCASE_FIELD_DEFS],
+    [Output(cid, "disabled") for cid, _ in _SC_SUBCASE_FIELD_DEFS] +
+    [Output("sc-contact-state", "options"),
+     Output("sc-attorney-state", "options"),
+     Output("sc-contact-state-custom", "value"),
+     Output("sc-attorney-state-custom", "value"),
+     Output("sc-contact-state-custom", "disabled"),
+     Output("sc-attorney-state-custom", "disabled")],
     Input("sc-subcase", "value"),
 )
 def populate_sc_subcase_fields(subcase_id):
     if subcase_id is None:
-        return (None,) * len(_SC_SUBCASE_FIELD_DEFS) * 2
+        base_opts = _state_options_for(_db_custom_states())
+        return (None,) * (len(_SC_SUBCASE_FIELD_DEFS) * 2) + (base_opts, base_opts, "", "", False, False)
     can_edit = auth.can_edit_subcase(auth.current_user, subcase_id)
     sub = store.get_subcase(subcase_id)
     values = tuple(sub.get(key) or "" for _, key in _SC_SUBCASE_FIELD_DEFS)
     disabled = tuple(not can_edit for _ in _SC_SUBCASE_FIELD_DEFS)
-    return values + disabled
+    extras = {sub.get("contact_state") or "", sub.get("attorney_state") or ""}
+    options = _state_options_for(extras)
+    return values + disabled + (options, options, "", "", not can_edit, not can_edit)
+
+
+@callback(
+    Output("sc-contact-state-custom-wrap", "style"),
+    Output("sc-attorney-state-custom-wrap", "style"),
+    Input("sc-contact-state", "value"),
+    Input("sc-attorney-state", "value"),
+)
+def toggle_state_custom(contact_state, attorney_state):
+    def wrap_style(value):
+        return {"display": "block"} if value == CUSTOM_STATE_KEY else {"display": "none"}
+    return wrap_style(contact_state), wrap_style(attorney_state)
 
 
 @callback(
@@ -1348,6 +1420,7 @@ def populate_sc_subcase_fields(subcase_id):
     State("sc-contact-address2", "value"),
     State("sc-contact-city", "value"),
     State("sc-contact-state", "value"),
+    State("sc-contact-state-custom", "value"),
     State("sc-contact-zip", "value"),
     State("sc-contact-phone", "value"),
     State("sc-contact-email", "value"),
@@ -1357,6 +1430,7 @@ def populate_sc_subcase_fields(subcase_id):
     State("sc-attorney-address2", "value"),
     State("sc-attorney-city", "value"),
     State("sc-attorney-state", "value"),
+    State("sc-attorney-state-custom", "value"),
     State("sc-attorney-zip", "value"),
     State("sc-attorney-phone", "value"),
     State("sc-attorney-email", "value"),
@@ -1365,12 +1439,14 @@ def populate_sc_subcase_fields(subcase_id):
 def save_sc_subcase(n,
                     subcase_id, file_number, filing_date,
                     contact_name, contact_address, contact_address2, contact_city, contact_state,
-                    contact_zip, contact_phone, contact_email,
+                    contact_state_custom, contact_zip, contact_phone, contact_email,
                     attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
-                    attorney_state, attorney_zip, attorney_phone, attorney_email):
+                    attorney_state, attorney_state_custom, attorney_zip, attorney_phone, attorney_email):
     if subcase_id is None:
         return dbc.Alert("Select a subcase first.", color="warning")
     auth.guard_edit_subcase(subcase_id)
+    contact_state = (contact_state_custom or "").strip() if contact_state == CUSTOM_STATE_KEY else contact_state
+    attorney_state = (attorney_state_custom or "").strip() if attorney_state == CUSTOM_STATE_KEY else attorney_state
     try:
         fn = store.update_subcase_metadata(
             subcase_id,

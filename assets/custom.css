@@ -1,0 +1,4 @@
+/* Management Console: make dropdown controls match the taller (50px) inputs */
+.manage-console .dash-dropdown {
+    height: 50px;
+}
