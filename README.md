@@ -4,24 +4,6 @@ This is a tool for analyzing preference claims in bankruptcy under Section 547 o
 
 PAT is in early development and should not be used for real-world use at this point. As PAT develops, new features will be added.
 
-**Installation and Running**
-
-Requires Python 3.11 or newer (developed and tested on Python 3.14).
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate        # on Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-```
-
-Then open http://127.0.0.1:8050 in a browser.
-
-Notes:
-- The SQLite databases (`pat_cases.db`, `pat_state.db`, `pat_users.db`) are created automatically on first run.
-- The data files `courts.json` and `states.json` must stay in the same directory as `app.py`.
-- The web UI loads the Bootswatch theme, Font Awesome, and Dash ag-grid JavaScript from a CDN at runtime, so internet access is needed unless those assets are vendored locally.
-
 **Current Features**
 - Handles creating historical baseline based on historical invoicing data.
 - Gives statatistical insights on whether a standard deviation approach may be appropriate.
@@ -36,6 +18,24 @@ Notes:
 **Future Features**
 - Data entry tools
 - Integrations with other software.
+
+**Installation and Running**
+
+Requires Python 3.11 or newer (developed and tested on Python 3.14).
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # on Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+
+Then open http://127.0.0.1:8050 in a browser.
+
+*Notes:*
+- The SQLite databases (`pat_cases.db`, `pat_state.db`, `pat_users.db`) are created automatically on first run.
+- The data files `courts.json` and `states.json` must stay in the same directory as `app.py`.
+- The web UI loads the Bootswatch theme, Font Awesome, and Dash ag-grid JavaScript from a CDN at runtime, so internet access is needed unless those assets are vendored locally.
 
 
 PAT is written in Python using the Dash library and should run on any platform that supports Python and Dash.
