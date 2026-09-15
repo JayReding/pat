@@ -2,7 +2,7 @@
 
 This is a tool for analyzing preference claims in bankruptcy under Section 547 of the Bankruptcy Code. It analyzes common defenses such as the ordinary course of business defense and the new value defense.
 
-PAT is in early development and should not be used for real-world use at this point. As PAT develops, new features will be added.
+PAT is in early development and should not be used for real-world use at this point. However, PAY
 
 **Current Features**
 - Handles creating historical baseline based on historical invoicing data.
@@ -12,11 +12,13 @@ PAT is in early development and should not be used for real-world use at this po
 - Indicates whether a "total range" approach for ordinary course of business may be inappropriate.
 - Calculates subsequent new value, including the interplay between ordinary course and new value defenses.
 - Saves state of each case so that OCB ranges and other settings are preserved.
-- Allows for analyzing the ordinary course by DSO (days an invoice is outstanding from the invoice date) or DPD (days an invoice is past due)
-- Basic user management and administration
+- Allows for analyzing the ordinary course by DSO (days an invoice is outstanding from the invoice date) or DPD (days an invoice is past due).
+- Basic user management and administration.
+- Can export charts in PDF or Excel for use as exhibits.
 
 **Future Features**
 - Data entry tools
+- More robust multi-user support
 - Integrations with other software.
 
 **Installation and Running**
