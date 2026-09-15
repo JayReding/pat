@@ -154,6 +154,9 @@ _META_KEYS = [
     'contact_zip', 'contact_phone', 'contact_email',
     'attorney_name', 'attorney_firm', 'attorney_address', 'attorney_address2', 'attorney_city',
     'attorney_state', 'attorney_zip', 'attorney_phone', 'attorney_email',
+    'local_counsel_name', 'local_counsel_firm', 'local_counsel_address', 'local_counsel_address2',
+    'local_counsel_city', 'local_counsel_state', 'local_counsel_zip', 'local_counsel_phone',
+    'local_counsel_email',
 ]
 
 
@@ -419,6 +422,11 @@ def init_users_db():
             PRIMARY KEY (user_id, subcase_id)
         );
     ''')
+    ucols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if 'name' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
+    if 'avatar_color' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN avatar_color TEXT")
     conn.commit()
     return conn
 
@@ -468,6 +476,16 @@ def list_users():
 def set_user_role(user_id, role):
     conn = _connect_users()
     conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, int(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def update_user_profile(user_id, name=None, email=None, avatar_color=None):
+    conn = _connect_users()
+    conn.execute(
+        "UPDATE users SET name = ?, email = ?, avatar_color = ? WHERE id = ?",
+        (name, email, avatar_color, int(user_id)),
+    )
     conn.commit()
     conn.close()
 

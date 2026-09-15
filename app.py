@@ -1,7 +1,7 @@
 # Import packages
 import json
 import os
-from dash import Dash, html, dcc, callback, Output, Input, State
+from dash import Dash, html, dcc, callback, Output, Input, State, ALL
 from dash.exceptions import PreventUpdate
 import dash
 import dash_ag_grid as dag
@@ -34,6 +34,47 @@ STATE_OPTIONS = sorted(_STATES.values(), key=str.lower)
 STATE_SET = set(STATE_OPTIONS)
 CUSTOM_STATE_KEY = "__type_your_own__"
 
+AVATAR_COLORS = [
+    '#b02a37', '#0d6efd', '#198754', '#fd7e14', '#6f42c1',
+    '#20c997', '#d63384', '#0dcaf0',
+]
+
+
+def _initials(name, username):
+    source = (name or '').strip() or (username or 'U')
+    words = [w for w in source.split() if w]
+    if len(words) >= 2:
+        return (words[0][0] + words[-1][0]).upper()
+    return source[:2].upper()
+
+
+def _avatar_color_for(username, stored=None):
+    if stored:
+        return stored
+    return AVATAR_COLORS[sum(ord(c) for c in (username or '')) % len(AVATAR_COLORS)]
+
+
+def _avatar_circle(name, username, color, size):
+    return html.Div(
+        _initials(name, username),
+        style={
+            'width': f'{size}px', 'height': f'{size}px', 'borderRadius': '50%',
+            'backgroundColor': _avatar_color_for(username, color), 'color': '#fff',
+            'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
+            'fontWeight': '700', 'fontSize': f'{max(10, size // 2)}px',
+            'lineHeight': 1, 'userSelect': 'none', 'flexShrink': 0,
+        },
+    )
+
+
+def _user_badge(u):
+    label = (u.name or '').strip() or u.username
+    return html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '8px'}, children=[
+        _avatar_circle(u.name, u.username, u.avatar_color, 30),
+        dcc.Link(label, href='/manage', className='text-white fw-semibold',
+                 style={'textDecoration': 'none'}),
+    ])
+
 
 def _db_custom_states():
     conn = store._connect_cases()
@@ -44,7 +85,7 @@ def _db_custom_states():
     extras = set()
     for (m,) in rows:
         meta = json.loads(m or '{}')
-        for key in ('contact_state', 'attorney_state'):
+        for key in ('contact_state', 'attorney_state', 'local_counsel_state'):
             v = meta.get(key)
             if v and v not in STATE_SET and v != CUSTOM_STATE_KEY:
                 extras.add(v)
@@ -436,7 +477,9 @@ def _manage_header():
 def _manage_sidebar(active):
     return dbc.Col(width=2, style={"borderRight": "1px solid var(--bs-border-color)", "padding": "16px"}, children=[
         dbc.Nav([
-            html.Div("Case Management", className="sidebar-heading mb-1 mt-1 px-3 text-uppercase small fw-bold text-muted"),
+            html.Div("My Account", className="sidebar-heading mb-1 mt-1 px-3 text-uppercase small fw-bold text-muted"),
+            dbc.NavLink("Account Settings", href="/manage/account", active=(active == "account"), className="mb-2"),
+            html.Div("Case Management", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
             dbc.NavLink("Main Case Management", href="/manage", active=(active == "main"), className="mb-2"),
             dbc.NavLink("Subcase Management", href="/manage/subcases", active=(active == "subcase"), className="mb-2"),
             html.Div("Administration", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
@@ -496,18 +539,40 @@ def _subcase_page():
                 ]),
                 _cm_field('Contact Phone', "sc-contact-phone"),
                 _cm_field('Contact Email', "sc-contact-email", "email"),
-                html.H6('Attorney', className="mt-3"),
-                _cm_field('Attorney Name', "sc-attorney-name"),
-                _cm_field('Attorney Firm', "sc-attorney-firm"),
-                _cm_field('Attorney Address', "sc-attorney-address"),
-                _cm_field('Attorney Address 2', "sc-attorney-address2"),
-                html.Div(className="d-flex flex-wrap gap-2", children=[
-                    _cm_field('City', "sc-attorney-city"),
-                    _cm_state_field('State', "sc-attorney-state", "sc-attorney-state-custom", "sc-attorney-state-custom-wrap"),
-                    _cm_field('ZIP', "sc-attorney-zip"),
+                dbc.Row([
+                    dbc.Col(width=6, children=[
+                        html.H4('Attorney', className="mt-3"),
+                        html.Div(className="ps-4", children=[
+                            _cm_field('Attorney Name', "sc-attorney-name"),
+                            _cm_field('Attorney Firm', "sc-attorney-firm"),
+                            _cm_field('Attorney Address', "sc-attorney-address"),
+                            _cm_field('Attorney Address 2', "sc-attorney-address2"),
+                            html.Div(className="d-flex flex-wrap gap-2", children=[
+                                _cm_field('City', "sc-attorney-city"),
+                                _cm_state_field('State', "sc-attorney-state", "sc-attorney-state-custom", "sc-attorney-state-custom-wrap"),
+                                _cm_field('ZIP', "sc-attorney-zip"),
+                            ]),
+                            _cm_field('Attorney Phone', "sc-attorney-phone"),
+                            _cm_field('Attorney Email', "sc-attorney-email", "email"),
+                        ]),
+                    ]),
+                    dbc.Col(width=6, children=[
+                        html.H4('Local Counsel', className="mt-3"),
+                        html.Div(className="ps-4", children=[
+                            _cm_field('Local Counsel Name', "sc-local-counsel-name"),
+                            _cm_field('Local Counsel Firm', "sc-local-counsel-firm"),
+                            _cm_field('Local Counsel Address', "sc-local-counsel-address"),
+                            _cm_field('Local Counsel Address 2', "sc-local-counsel-address2"),
+                            html.Div(className="d-flex flex-wrap gap-2", children=[
+                                _cm_field('City', "sc-local-counsel-city"),
+                                _cm_state_field('State', "sc-local-counsel-state", "sc-local-counsel-state-custom", "sc-local-counsel-state-custom-wrap"),
+                                _cm_field('ZIP', "sc-local-counsel-zip"),
+                            ]),
+                            _cm_field('Local Counsel Phone', "sc-local-counsel-phone"),
+                            _cm_field('Local Counsel Email', "sc-local-counsel-email", "email"),
+                        ]),
+                    ]),
                 ]),
-                _cm_field('Attorney Phone', "sc-attorney-phone"),
-                _cm_field('Attorney Email', "sc-attorney-email", "email"),
                 dbc.Button("Save Subcase", id="sc-save-subcase", n_clicks=0, color="primary", className="mt-2"),
                 html.Div(id="sc-subcase-status", className="mt-3"),
             ]),
@@ -584,6 +649,32 @@ def _users_page():
     ])
 
 
+def _account_page():
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
+        _manage_header(),
+        dcc.Store(id="manage-boot", data=True),
+        dcc.Store(id="account-boot", data=True),
+        dcc.Store(id="account-avatar-color", data=None),
+        dcc.Store(id="account-save-trigger", data=0),
+        dcc.Store(id="account-saved", data=None),
+        html.Hr(),
+        dbc.Row([
+            _manage_sidebar("account"),
+            dbc.Col(width=10, children=[
+                html.H3(children='Account Settings'),
+                html.P('Set your display name, contact email, and avatar color. Your avatar shows your initials on a colored circle.', className="text-muted"),
+                html.Div(id="account-avatar-preview", className="mb-3"),
+                html.H6('Avatar color'),
+                html.Div(id="avatar-swatches", className="d-flex flex-wrap gap-2 mb-3"),
+                _cm_field('Name', "account-name"),
+                _cm_field('Email', "account-email", "email"),
+                dbc.Button("Save Settings", id="account-save-btn", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(id="account-status", className="mt-3"),
+            ]),
+        ]),
+    ])
+
+
 def _shell():
     return html.Div(children=[
         dbc.Navbar(
@@ -609,6 +700,7 @@ def _shell():
 
 
 dash.register_page("analysis", path="/", layout=_analysis_page(), title="Preference Analysis Tool", name="Analysis")
+dash.register_page("account", path="/manage/account", layout=_account_page(), title="Account Settings", name="Account Settings")
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
 dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
@@ -1208,15 +1300,11 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
 
 @callback(
     Output("user-badge", "children"),
-    Input("shell-boot", "data")
+    Input("shell-boot", "data"),
+    Input("account-saved", "data"),
 )
-def update_user_badge(_):
-    u = auth.current_user
-    label = f"{u.role.title()} — {u.username}"
-    if u.role in ("admin", "case_manager"):
-        return dcc.Link(label, href="/manage",
-                        className="text-white fw-semibold")
-    return label
+def update_user_badge(_boot, _saved):
+    return _user_badge(auth.current_user)
 
 
 @callback(
@@ -1227,6 +1315,82 @@ def manage_admin_gate(_):
     if auth.current_user.role == "admin":
         return dash.no_update
     return {"display": "none"}
+
+
+def _avatar_swatches(selected_color):
+    return [
+        dbc.Button(html.Div(), id={"type": "avatar-swatch", "index": color},
+                   n_clicks=0, className="avatar-swatch" + (" avatar-swatch-selected" if color == selected_color else ""),
+                   style={"backgroundColor": color})
+        for color in AVATAR_COLORS
+    ]
+
+
+@callback(
+    Output("account-avatar-color", "data"),
+    Output("account-name", "value"),
+    Output("account-email", "value"),
+    Output("account-avatar-preview", "children"),
+    Output("avatar-swatches", "children"),
+    Input("account-boot", "data"),
+)
+def account_load(_):
+    u = auth.current_user
+    color = _avatar_color_for(u.username, u.avatar_color)
+    return color, (u.name or ""), (u.email or ""), _avatar_circle(u.name, u.username, color, 64), _avatar_swatches(color)
+
+
+@callback(
+    Output("account-avatar-color", "data", allow_duplicate=True),
+    Output("account-avatar-preview", "children", allow_duplicate=True),
+    Output("avatar-swatches", "children", allow_duplicate=True),
+    Input({"type": "avatar-swatch", "index": ALL}, "n_clicks"),
+    State("account-name", "value"),
+    prevent_initial_call=True,
+)
+def account_pick_color(n_clicks_values, name):
+    if not any((n or 0) > 0 for n in (n_clicks_values or [])):
+        raise PreventUpdate
+    trig = dash.callback_context.triggered[0]['prop_id']
+    index = None
+    if '.' in trig:
+        try:
+            index = json.loads(trig.split('.')[0])['index']
+        except (ValueError, KeyError):
+            index = None
+    u = auth.current_user
+    color = _avatar_color_for(u.username, index)
+    return color, _avatar_circle(name, u.username, color, 64), _avatar_swatches(color)
+
+
+@callback(
+    Output("account-status", "children"),
+    Output("account-saved", "data"),
+    Input("account-save-trigger", "data"),
+    State("account-name", "value"),
+    State("account-email", "value"),
+    State("account-avatar-color", "data"),
+    prevent_initial_call=True,
+)
+def account_save(trigger, name, email, avatar_color):
+    if not trigger:
+        raise PreventUpdate
+    u = auth.current_user
+    from datetime import datetime
+    n_name = (name or "").strip()
+    n_email = (email or "").strip()
+    n_color = avatar_color if avatar_color in AVATAR_COLORS else None
+    store.update_user_profile(u.id, name=n_name, email=n_email, avatar_color=n_color)
+    return dbc.Alert("Settings saved.", color="success"), datetime.now().isoformat()
+
+
+@callback(
+    Output("account-save-trigger", "data"),
+    Input("account-save-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def _arm_account_save(n):
+    return n or 0
 
 
 @callback(
@@ -1358,6 +1522,15 @@ _SC_SUBCASE_FIELD_DEFS = [
     ("sc-attorney-zip", "attorney_zip"),
     ("sc-attorney-phone", "attorney_phone"),
     ("sc-attorney-email", "attorney_email"),
+    ("sc-local-counsel-name", "local_counsel_name"),
+    ("sc-local-counsel-firm", "local_counsel_firm"),
+    ("sc-local-counsel-address", "local_counsel_address"),
+    ("sc-local-counsel-address2", "local_counsel_address2"),
+    ("sc-local-counsel-city", "local_counsel_city"),
+    ("sc-local-counsel-state", "local_counsel_state"),
+    ("sc-local-counsel-zip", "local_counsel_zip"),
+    ("sc-local-counsel-phone", "local_counsel_phone"),
+    ("sc-local-counsel-email", "local_counsel_email"),
 ]
 
 
@@ -1378,35 +1551,40 @@ def populate_sc_subcase(main_id):
     [Output(cid, "disabled") for cid, _ in _SC_SUBCASE_FIELD_DEFS] +
     [Output("sc-contact-state", "options"),
      Output("sc-attorney-state", "options"),
+     Output("sc-local-counsel-state", "options"),
      Output("sc-contact-state-custom", "value"),
      Output("sc-attorney-state-custom", "value"),
+     Output("sc-local-counsel-state-custom", "value"),
      Output("sc-contact-state-custom", "disabled"),
-     Output("sc-attorney-state-custom", "disabled")],
+     Output("sc-attorney-state-custom", "disabled"),
+     Output("sc-local-counsel-state-custom", "disabled")],
     Input("sc-subcase", "value"),
 )
 def populate_sc_subcase_fields(subcase_id):
     if subcase_id is None:
         base_opts = _state_options_for(_db_custom_states())
-        return (None,) * (len(_SC_SUBCASE_FIELD_DEFS) * 2) + (base_opts, base_opts, "", "", False, False)
+        return (None,) * (len(_SC_SUBCASE_FIELD_DEFS) * 2) + (base_opts, base_opts, base_opts, "", "", "", False, False, False)
     can_edit = auth.can_edit_subcase(auth.current_user, subcase_id)
     sub = store.get_subcase(subcase_id)
     values = tuple(sub.get(key) or "" for _, key in _SC_SUBCASE_FIELD_DEFS)
     disabled = tuple(not can_edit for _ in _SC_SUBCASE_FIELD_DEFS)
-    extras = {sub.get("contact_state") or "", sub.get("attorney_state") or ""}
+    extras = {sub.get("contact_state") or "", sub.get("attorney_state") or "", sub.get("local_counsel_state") or ""}
     options = _state_options_for(extras)
-    return values + disabled + (options, options, "", "", not can_edit, not can_edit)
+    return values + disabled + (options, options, options, "", "", "", not can_edit, not can_edit, not can_edit)
 
 
 @callback(
     Output("sc-contact-state-custom-wrap", "style"),
     Output("sc-attorney-state-custom-wrap", "style"),
+    Output("sc-local-counsel-state-custom-wrap", "style"),
     Input("sc-contact-state", "value"),
     Input("sc-attorney-state", "value"),
+    Input("sc-local-counsel-state", "value"),
 )
-def toggle_state_custom(contact_state, attorney_state):
+def toggle_state_custom(contact_state, attorney_state, local_counsel_state):
     def wrap_style(value):
         return {"display": "block"} if value == CUSTOM_STATE_KEY else {"display": "none"}
-    return wrap_style(contact_state), wrap_style(attorney_state)
+    return wrap_style(contact_state), wrap_style(attorney_state), wrap_style(local_counsel_state)
 
 
 @callback(
@@ -1434,6 +1612,16 @@ def toggle_state_custom(contact_state, attorney_state):
     State("sc-attorney-zip", "value"),
     State("sc-attorney-phone", "value"),
     State("sc-attorney-email", "value"),
+    State("sc-local-counsel-name", "value"),
+    State("sc-local-counsel-firm", "value"),
+    State("sc-local-counsel-address", "value"),
+    State("sc-local-counsel-address2", "value"),
+    State("sc-local-counsel-city", "value"),
+    State("sc-local-counsel-state", "value"),
+    State("sc-local-counsel-state-custom", "value"),
+    State("sc-local-counsel-zip", "value"),
+    State("sc-local-counsel-phone", "value"),
+    State("sc-local-counsel-email", "value"),
     prevent_initial_call=True,
 )
 def save_sc_subcase(n,
@@ -1441,12 +1629,16 @@ def save_sc_subcase(n,
                     contact_name, contact_address, contact_address2, contact_city, contact_state,
                     contact_state_custom, contact_zip, contact_phone, contact_email,
                     attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
-                    attorney_state, attorney_state_custom, attorney_zip, attorney_phone, attorney_email):
+                    attorney_state, attorney_state_custom, attorney_zip, attorney_phone, attorney_email,
+                    local_counsel_name, local_counsel_firm, local_counsel_address, local_counsel_address2,
+                    local_counsel_city, local_counsel_state, local_counsel_state_custom, local_counsel_zip,
+                    local_counsel_phone, local_counsel_email):
     if subcase_id is None:
         return dbc.Alert("Select a subcase first.", color="warning")
     auth.guard_edit_subcase(subcase_id)
     contact_state = (contact_state_custom or "").strip() if contact_state == CUSTOM_STATE_KEY else contact_state
     attorney_state = (attorney_state_custom or "").strip() if attorney_state == CUSTOM_STATE_KEY else attorney_state
+    local_counsel_state = (local_counsel_state_custom or "").strip() if local_counsel_state == CUSTOM_STATE_KEY else local_counsel_state
     try:
         fn = store.update_subcase_metadata(
             subcase_id,
@@ -1460,6 +1652,12 @@ def save_sc_subcase(n,
             attorney_city=attorney_city, attorney_state=attorney_state,
             attorney_zip=attorney_zip, attorney_phone=attorney_phone,
             attorney_email=attorney_email,
+            local_counsel_name=local_counsel_name, local_counsel_firm=local_counsel_firm,
+            local_counsel_address=local_counsel_address,
+            local_counsel_address2=local_counsel_address2,
+            local_counsel_city=local_counsel_city, local_counsel_state=local_counsel_state,
+            local_counsel_zip=local_counsel_zip, local_counsel_phone=local_counsel_phone,
+            local_counsel_email=local_counsel_email,
         )
         return dbc.Alert(f"Saved. File number: {fn}", color="success")
     except ValueError as e:

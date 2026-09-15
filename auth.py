@@ -24,6 +24,8 @@ class User(UserMixin):
         self.password_hash = row['password_hash']
         self.role = row['role']
         self.email = row.get('email')
+        self.name = row.get('name')
+        self.avatar_color = row.get('avatar_color')
         self.active = bool(row.get('active', 1))
 
     @property

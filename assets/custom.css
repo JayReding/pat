@@ -2,3 +2,17 @@
 .manage-console .dash-dropdown {
     height: 50px;
 }
+
+/* Avatar color picker swatches */
+.avatar-swatch {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    padding: 0;
+    border: 2px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+}
+
+.avatar-swatch-selected {
+    box-shadow: 0 0 0 3px #212529;
+}
