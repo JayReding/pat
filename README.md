@@ -2,7 +2,7 @@
 
 This is a tool for analyzing preference claims in bankruptcy under Section 547 of the Bankruptcy Code. It analyzes common defenses such as the ordinary course of business defense and the new value defense.
 
-PAT is in early development and should not be used for real-world use at this point. However, PAY
+PAT is in early development and should not be used for real-world use at this point.
 
 **Current Features**
 - Handles creating historical baseline based on historical invoicing data.
