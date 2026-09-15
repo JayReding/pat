@@ -379,132 +379,156 @@ def _cm_field(label, cid, ftype="text"):
     ])
 
 
-def _manage_page():
+def _manage_header():
+    return html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "16px"}, children=[
+        dcc.Link("← Back to Analysis", href="/", style={"textDecoration": "none"}),
+        html.H3(children="Management Console", style={"margin": 0}),
+        html.Span(),
+    ])
+
+
+def _manage_sidebar(active):
+    return dbc.Col(width=2, style={"borderRight": "1px solid var(--bs-border-color)", "padding": "16px"}, children=[
+        dbc.Nav([
+            html.Div("Case Management", className="sidebar-heading mb-1 mt-1 px-3 text-uppercase small fw-bold text-muted"),
+            dbc.NavLink("Main Case Management", href="/manage", active=(active == "main"), className="mb-2"),
+            dbc.NavLink("Subcase Management", href="/manage/subcases", active=(active == "subcase"), className="mb-2"),
+            html.Div("Administration", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
+            dbc.NavLink("User Management", id="admin-nav-btn", href="/manage/users", active=(active == "users")),
+        ], pills=True, vertical=True),
+    ])
+
+
+def _maincase_page():
     return html.Div(style={"padding": "20px"}, children=[
-        html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "16px"}, children=[
-            dcc.Link("← Back to Analysis", href="/", style={"textDecoration": "none"}),
-            html.H3(children="Management Console", style={"margin": 0}),
-            html.Span(),
-        ]),
+        _manage_header(),
         dcc.Store(id="manage-boot", data=True),
         html.Hr(),
         dbc.Row([
-            dbc.Col(width=2, style={"borderRight": "1px solid var(--bs-border-color)", "padding": "16px"}, children=[
-                dbc.Nav([
-                    dbc.NavLink("Case Management", id="cm-nav-btn", active=True, className="mb-2"),
-                    dbc.NavLink("User Management", id="admin-nav-btn", active=False),
-                ], pills=True, vertical=True),
-            ]),
+            _manage_sidebar("main"),
             dbc.Col(width=10, children=[
-                html.Div(id="cm-section", children=[
-                    html.H3(children='Case Management'),
-                    dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
-                    html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                        html.Label('Case Name', htmlFor="cm-case-name"), dcc.Input(id="cm-case-name", type="text", className="form-control"),
-                    ]),
-                    html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                        html.Label('Case Number', htmlFor="cm-case-number"), dcc.Input(id="cm-case-number", type="text", className="form-control"),
-                    ]),
-                    html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                        html.Label('Jurisdiction', htmlFor="cm-jurisdiction"), dcc.Input(id="cm-jurisdiction", type="text", className="form-control"),
-                    ]),
-                    html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                        html.Label('Judge', htmlFor="cm-judge"), dcc.Input(id="cm-judge", type="text", className="form-control"),
-                    ]),
-                    html.Div(className="mb-2", style={"maxWidth": "420px"}, children=[
-                        html.Label('Petition Date (YYYY-MM-DD)', htmlFor="cm-petition-date"), dcc.Input(id="cm-petition-date", type="date", className="form-control"),
-                    ]),
-                    dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
-                    html.Div(id="cm-subcase-list", className="mt-3"),
-                    html.Hr(),
-                    html.H5('Subcase Details'),
-                    dcc.Dropdown(id="cm-subcase", options=[], clearable=False, style={"maxWidth": "420px", "marginBottom": "16px"}),
-                    _cm_field('File Number (blank = auto-assign)', "cm-file-number"),
-                    _cm_field('Filing Date (YYYY-MM-DD)', "cm-filing-date", "date"),
-                    html.H6('Contact', className="mt-3"),
-                    _cm_field('Contact Name', "cm-contact-name"),
-                    _cm_field('Contact Address', "cm-contact-address"),
-                    _cm_field('Contact Address 2', "cm-contact-address2"),
-                    html.Div(className="d-flex flex-wrap gap-2", children=[
-                        _cm_field('City', "cm-contact-city"),
-                        _cm_field('State', "cm-contact-state"),
-                        _cm_field('ZIP', "cm-contact-zip"),
-                    ]),
-                    _cm_field('Contact Phone', "cm-contact-phone"),
-                    _cm_field('Contact Email', "cm-contact-email", "email"),
-                    html.H6('Attorney', className="mt-3"),
-                    _cm_field('Attorney Name', "cm-attorney-name"),
-                    _cm_field('Attorney Firm', "cm-attorney-firm"),
-                    _cm_field('Attorney Address', "cm-attorney-address"),
-                    _cm_field('Attorney Address 2', "cm-attorney-address2"),
-                    html.Div(className="d-flex flex-wrap gap-2", children=[
-                        _cm_field('City', "cm-attorney-city"),
-                        _cm_field('State', "cm-attorney-state"),
-                        _cm_field('ZIP', "cm-attorney-zip"),
-                    ]),
-                    _cm_field('Attorney Phone', "cm-attorney-phone"),
-                    _cm_field('Attorney Email', "cm-attorney-email", "email"),
-                    dbc.Button("Save Subcase", id="cm-save-subcase", n_clicks=0, color="primary", className="mt-2"),
-                    html.Div(id="cm-subcase-status", className="mt-3"),
-                    html.Div(id="cm-status", className="mt-3"),
+                html.H3(children='Main Case Management'),
+                dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+                _cm_field('Case Name', "cm-case-name"),
+                _cm_field('Case Number', "cm-case-number"),
+                _cm_field('Jurisdiction', "cm-jurisdiction"),
+                _cm_field('Judge', "cm-judge"),
+                _cm_field('Petition Date (YYYY-MM-DD)', "cm-petition-date", "date"),
+                dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(id="cm-status", className="mt-3"),
+            ]),
+        ]),
+    ])
+
+
+def _subcase_page():
+    return html.Div(style={"padding": "20px"}, children=[
+        _manage_header(),
+        dcc.Store(id="manage-boot", data=True),
+        html.Hr(),
+        dbc.Row([
+            _manage_sidebar("subcase"),
+            dbc.Col(width=10, children=[
+                html.H3(children='Subcase Management'),
+                dcc.Dropdown(id="sc-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "500px", "marginBottom": "16px"}),
+                html.H5('Subcase Details', className="mt-3"),
+                dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "420px", "marginBottom": "16px"}),
+                _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
+                _cm_field('Filing Date (YYYY-MM-DD)', "sc-filing-date", "date"),
+                html.H6('Contact', className="mt-3"),
+                _cm_field('Contact Name', "sc-contact-name"),
+                _cm_field('Contact Address', "sc-contact-address"),
+                _cm_field('Contact Address 2', "sc-contact-address2"),
+                html.Div(className="d-flex flex-wrap gap-2", children=[
+                    _cm_field('City', "sc-contact-city"),
+                    _cm_field('State', "sc-contact-state"),
+                    _cm_field('ZIP', "sc-contact-zip"),
                 ]),
-                html.Div(id="admin-section", style={"display": "none"}, children=[
-                    html.H3(children='User Management'),
-                    html.Div(className="text-muted mb-3", id="admin-notice"),
-                    dag.AgGrid(
-                        id="admin-users-grid",
-                        dashGridOptions={"rowSelection": "single"},
-                        columnDefs=[
-                            {"field": "username", "headerName": "Username"},
-                            {"field": "role", "headerName": "Role"},
-                            {"field": "email", "headerName": "Email"},
-                            {"field": "active", "headerName": "Active"},
-                            {"field": "created_at", "headerName": "Created At"},
-                        ],
-                    ),
-                    html.Hr(),
-                    html.H6('Create user'),
-                    html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                        html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control")]),
-                        html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control")]),
-                        html.Div(children=[html.Label('Email', htmlFor="new-user-email"), dcc.Input(id="new-user-email", type="email", className="form-control")]),
-                        html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "140px"})]),
-                        dbc.Button("Create User", id="admin-create-btn", color="primary"),
-                    ]),
-                    html.Hr(),
-                    html.H6('Actions on selected user'),
-                    html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                        html.Div(children=[html.Label('New role', htmlFor="admin-role-select"), dcc.Dropdown(id="admin-role-select", options=[{"label": r, "value": r} for r in auth.ROLES], style={"minWidth": "140px"})]),
-                        html.Div(children=[html.Label('New password (reset)', htmlFor="admin-reset-pw"), dcc.Input(id="admin-reset-pw", type="password", className="form-control")]),
-                        dbc.Button("Set Role", id="admin-set-role-btn", color="secondary"),
-                        dbc.Button("Reset Password", id="admin-reset-btn", color="secondary"),
-                        dbc.Button("Activate/Deactivate", id="admin-toggle-btn", color="secondary"),
-                        dbc.Button("Delete User", id="admin-delete-btn", color="danger"),
-                    ]),
-                    html.Div(id="admin-status", className="mt-3"),
-                    html.Hr(),
-                    html.H6('Case Access (grants)'),
-                    html.P('Grant a user access to a main case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
-                    html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                        html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
-                        html.Div(children=[html.Label('Main case', htmlFor="grant-main"), dcc.Dropdown(id="grant-main", options=store.list_main_options(), style={"minWidth": "260px"})]),
-                        html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
-                        dbc.Button("Grant Main Case", id="grant-main-btn", color="secondary"),
-                        dbc.Button("Revoke Main Case", id="revoke-main-btn", color="secondary"),
-                        dbc.Button("Grant Subcase", id="grant-subcase-btn", color="secondary"),
-                        dbc.Button("Revoke Subcase", id="revoke-subcase-btn", color="danger"),
-                    ]),
-                    html.Div(id="grant-status", className="mt-2"),
-                    dag.AgGrid(
-                        id="grants-grid",
-                        columnDefs=[
-                            {"field": "username", "headerName": "User"},
-                            {"field": "level", "headerName": "Level"},
-                            {"field": "main_case_id", "headerName": "Main Case ID"},
-                            {"field": "subcase_id", "headerName": "Subcase ID"},
-                        ],
-                    ),
+                _cm_field('Contact Phone', "sc-contact-phone"),
+                _cm_field('Contact Email', "sc-contact-email", "email"),
+                html.H6('Attorney', className="mt-3"),
+                _cm_field('Attorney Name', "sc-attorney-name"),
+                _cm_field('Attorney Firm', "sc-attorney-firm"),
+                _cm_field('Attorney Address', "sc-attorney-address"),
+                _cm_field('Attorney Address 2', "sc-attorney-address2"),
+                html.Div(className="d-flex flex-wrap gap-2", children=[
+                    _cm_field('City', "sc-attorney-city"),
+                    _cm_field('State', "sc-attorney-state"),
+                    _cm_field('ZIP', "sc-attorney-zip"),
                 ]),
+                _cm_field('Attorney Phone', "sc-attorney-phone"),
+                _cm_field('Attorney Email', "sc-attorney-email", "email"),
+                dbc.Button("Save Subcase", id="sc-save-subcase", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(id="sc-subcase-status", className="mt-3"),
+            ]),
+        ]),
+    ])
+
+
+def _users_page():
+    return html.Div(style={"padding": "20px"}, children=[
+        _manage_header(),
+        dcc.Store(id="manage-boot", data=True),
+        dcc.Store(id="users-boot", data=True),
+        html.Hr(),
+        dbc.Row([
+            _manage_sidebar("users"),
+            dbc.Col(width=10, children=[
+                html.H3(children='User Management'),
+                html.Div(className="text-muted mb-3", id="admin-notice"),
+                dag.AgGrid(
+                    id="admin-users-grid",
+                    dashGridOptions={"rowSelection": "single"},
+                    columnDefs=[
+                        {"field": "username", "headerName": "Username"},
+                        {"field": "role", "headerName": "Role"},
+                        {"field": "email", "headerName": "Email"},
+                        {"field": "active", "headerName": "Active"},
+                        {"field": "created_at", "headerName": "Created At"},
+                    ],
+                ),
+                html.Hr(),
+                html.H6('Create user'),
+                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                    html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control")]),
+                    html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control")]),
+                    html.Div(children=[html.Label('Email', htmlFor="new-user-email"), dcc.Input(id="new-user-email", type="email", className="form-control")]),
+                    html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "140px"})]),
+                    dbc.Button("Create User", id="admin-create-btn", color="primary"),
+                ]),
+                html.Hr(),
+                html.H6('Actions on selected user'),
+                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                    html.Div(children=[html.Label('New role', htmlFor="admin-role-select"), dcc.Dropdown(id="admin-role-select", options=[{"label": r, "value": r} for r in auth.ROLES], style={"minWidth": "140px"})]),
+                    html.Div(children=[html.Label('New password (reset)', htmlFor="admin-reset-pw"), dcc.Input(id="admin-reset-pw", type="password", className="form-control")]),
+                    dbc.Button("Set Role", id="admin-set-role-btn", color="secondary"),
+                    dbc.Button("Reset Password", id="admin-reset-btn", color="secondary"),
+                    dbc.Button("Activate/Deactivate", id="admin-toggle-btn", color="secondary"),
+                    dbc.Button("Delete User", id="admin-delete-btn", color="danger"),
+                ]),
+                html.Div(id="admin-status", className="mt-3"),
+                html.Hr(),
+                html.H6('Case Access (grants)'),
+                html.P('Grant a user access to a main case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
+                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
+                    html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
+                    html.Div(children=[html.Label('Main case', htmlFor="grant-main"), dcc.Dropdown(id="grant-main", options=store.list_main_options(), style={"minWidth": "260px"})]),
+                    html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
+                    dbc.Button("Grant Main Case", id="grant-main-btn", color="secondary"),
+                    dbc.Button("Revoke Main Case", id="revoke-main-btn", color="secondary"),
+                    dbc.Button("Grant Subcase", id="grant-subcase-btn", color="secondary"),
+                    dbc.Button("Revoke Subcase", id="revoke-subcase-btn", color="danger"),
+                ]),
+                html.Div(id="grant-status", className="mt-2"),
+                dag.AgGrid(
+                    id="grants-grid",
+                    columnDefs=[
+                        {"field": "username", "headerName": "User"},
+                        {"field": "level", "headerName": "Level"},
+                        {"field": "main_case_id", "headerName": "Main Case ID"},
+                        {"field": "subcase_id", "headerName": "Subcase ID"},
+                    ],
+                ),
             ]),
         ]),
     ])
@@ -534,8 +558,9 @@ def _shell():
     ])
 
 
-dash.register_page("analysis", path="/", layout=_analysis_page(), title="Preference Analysis Tool", name="Analysis")
-dash.register_page("management", path="/manage", layout=_manage_page(), title="Management Console", name="Management Console")
+dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
+dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
+dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
 
 app.layout = _shell()
 
@@ -1154,27 +1179,11 @@ def manage_admin_gate(_):
 
 
 @callback(
-    Output("cm-nav-btn", "active"),
-    Output("admin-nav-btn", "active"),
-    Output("cm-section", "style"),
-    Output("admin-section", "style"),
-    Input("cm-nav-btn", "n_clicks"),
-    Input("admin-nav-btn", "n_clicks"),
-    prevent_initial_call=True
-)
-def manage_sidebar_nav(cm_clicks, admin_clicks):
-    trig = dash.callback_context.triggered_id
-    if trig == "admin-nav-btn":
-        return False, True, {"display": "none"}, {}
-    return True, False, {}, {"display": "none"}
-
-
-@callback(
     Output("admin-users-grid", "rowData", allow_duplicate=True),
     Output("admin-notice", "children"),
     Output("grants-grid", "rowData", allow_duplicate=True),
     Output("grant-user", "options"),
-    Input("manage-boot", "data"),
+    Input("users-boot", "data"),
     prevent_initial_call='initial_duplicate'
 )
 def admin_load(_):
@@ -1264,56 +1273,49 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
     Output("cm-judge", "disabled"),
     Output("cm-petition-date", "disabled"),
     Output("cm-save", "disabled"),
-    Output("cm-subcase-list", "children"),
     Input("cm-main", "value"),
 )
 def build_cm_details(main_id):
     if main_id is None:
-        return (None,) * 5 + (True,) * 6 + (html.P("Select a main case to view or edit its details.", className="text-muted"),)
+        return (None,) * 5 + (True,) * 6
     m = store.get_main_by_id(main_id)
-    subs = store.list_subcase_options(main_id)
     can_edit = auth.can_edit_main(auth.current_user, main_id)
-    sub_list = html.Div(children=[
-        html.Strong(f"Subcases ({len(subs)}):"),
-        html.Ul(children=[html.Li(s["label"]) for s in subs]),
-    ])
     return (
         m["case_name"], m["case_number"], m.get("jurisdiction") or "", m.get("judge") or "",
         m.get("petition_date") or "",
         not can_edit, not can_edit, not can_edit, not can_edit, not can_edit, not can_edit,
-        sub_list,
     )
 
 
-_SUBCASE_FIELD_DEFS = [
-    ("cm-file-number", "file_number"),
-    ("cm-filing-date", "filing_date"),
-    ("cm-contact-name", "contact_name"),
-    ("cm-contact-address", "contact_address"),
-    ("cm-contact-address2", "contact_address2"),
-    ("cm-contact-city", "contact_city"),
-    ("cm-contact-state", "contact_state"),
-    ("cm-contact-zip", "contact_zip"),
-    ("cm-contact-phone", "contact_phone"),
-    ("cm-contact-email", "contact_email"),
-    ("cm-attorney-name", "attorney_name"),
-    ("cm-attorney-firm", "attorney_firm"),
-    ("cm-attorney-address", "attorney_address"),
-    ("cm-attorney-address2", "attorney_address2"),
-    ("cm-attorney-city", "attorney_city"),
-    ("cm-attorney-state", "attorney_state"),
-    ("cm-attorney-zip", "attorney_zip"),
-    ("cm-attorney-phone", "attorney_phone"),
-    ("cm-attorney-email", "attorney_email"),
+_SC_SUBCASE_FIELD_DEFS = [
+    ("sc-file-number", "file_number"),
+    ("sc-filing-date", "filing_date"),
+    ("sc-contact-name", "contact_name"),
+    ("sc-contact-address", "contact_address"),
+    ("sc-contact-address2", "contact_address2"),
+    ("sc-contact-city", "contact_city"),
+    ("sc-contact-state", "contact_state"),
+    ("sc-contact-zip", "contact_zip"),
+    ("sc-contact-phone", "contact_phone"),
+    ("sc-contact-email", "contact_email"),
+    ("sc-attorney-name", "attorney_name"),
+    ("sc-attorney-firm", "attorney_firm"),
+    ("sc-attorney-address", "attorney_address"),
+    ("sc-attorney-address2", "attorney_address2"),
+    ("sc-attorney-city", "attorney_city"),
+    ("sc-attorney-state", "attorney_state"),
+    ("sc-attorney-zip", "attorney_zip"),
+    ("sc-attorney-phone", "attorney_phone"),
+    ("sc-attorney-email", "attorney_email"),
 ]
 
 
 @callback(
-    Output("cm-subcase", "options"),
-    Output("cm-subcase", "value"),
-    Input("cm-main", "value"),
+    Output("sc-subcase", "options"),
+    Output("sc-subcase", "value"),
+    Input("sc-main", "value"),
 )
-def populate_cm_subcase(main_id):
+def populate_sc_subcase(main_id):
     if main_id is None:
         return [], None
     opts = store.list_subcase_options(main_id)
@@ -1321,51 +1323,51 @@ def populate_cm_subcase(main_id):
 
 
 @callback(
-    [Output(cid, "value") for cid, _ in _SUBCASE_FIELD_DEFS] +
-    [Output(cid, "disabled") for cid, _ in _SUBCASE_FIELD_DEFS],
-    Input("cm-subcase", "value"),
+    [Output(cid, "value") for cid, _ in _SC_SUBCASE_FIELD_DEFS] +
+    [Output(cid, "disabled") for cid, _ in _SC_SUBCASE_FIELD_DEFS],
+    Input("sc-subcase", "value"),
 )
-def populate_cm_subcase_fields(subcase_id):
+def populate_sc_subcase_fields(subcase_id):
     if subcase_id is None:
-        return (None,) * len(_SUBCASE_FIELD_DEFS) * 2
+        return (None,) * len(_SC_SUBCASE_FIELD_DEFS) * 2
     can_edit = auth.can_edit_subcase(auth.current_user, subcase_id)
     sub = store.get_subcase(subcase_id)
-    values = tuple(sub.get(key) or "" for _, key in _SUBCASE_FIELD_DEFS)
-    disabled = tuple(not can_edit for _ in _SUBCASE_FIELD_DEFS)
+    values = tuple(sub.get(key) or "" for _, key in _SC_SUBCASE_FIELD_DEFS)
+    disabled = tuple(not can_edit for _ in _SC_SUBCASE_FIELD_DEFS)
     return values + disabled
 
 
 @callback(
-    Output("cm-subcase-status", "children"),
-    Input("cm-save-subcase", "n_clicks"),
-    State("cm-subcase", "value"),
-    State("cm-file-number", "value"),
-    State("cm-filing-date", "value"),
-    State("cm-contact-name", "value"),
-    State("cm-contact-address", "value"),
-    State("cm-contact-address2", "value"),
-    State("cm-contact-city", "value"),
-    State("cm-contact-state", "value"),
-    State("cm-contact-zip", "value"),
-    State("cm-contact-phone", "value"),
-    State("cm-contact-email", "value"),
-    State("cm-attorney-name", "value"),
-    State("cm-attorney-firm", "value"),
-    State("cm-attorney-address", "value"),
-    State("cm-attorney-address2", "value"),
-    State("cm-attorney-city", "value"),
-    State("cm-attorney-state", "value"),
-    State("cm-attorney-zip", "value"),
-    State("cm-attorney-phone", "value"),
-    State("cm-attorney-email", "value"),
+    Output("sc-subcase-status", "children"),
+    Input("sc-save-subcase", "n_clicks"),
+    State("sc-subcase", "value"),
+    State("sc-file-number", "value"),
+    State("sc-filing-date", "value"),
+    State("sc-contact-name", "value"),
+    State("sc-contact-address", "value"),
+    State("sc-contact-address2", "value"),
+    State("sc-contact-city", "value"),
+    State("sc-contact-state", "value"),
+    State("sc-contact-zip", "value"),
+    State("sc-contact-phone", "value"),
+    State("sc-contact-email", "value"),
+    State("sc-attorney-name", "value"),
+    State("sc-attorney-firm", "value"),
+    State("sc-attorney-address", "value"),
+    State("sc-attorney-address2", "value"),
+    State("sc-attorney-city", "value"),
+    State("sc-attorney-state", "value"),
+    State("sc-attorney-zip", "value"),
+    State("sc-attorney-phone", "value"),
+    State("sc-attorney-email", "value"),
     prevent_initial_call=True,
 )
-def save_subcase(n,
-                 subcase_id, file_number, filing_date,
-                 contact_name, contact_address, contact_address2, contact_city, contact_state,
-                 contact_zip, contact_phone, contact_email,
-                 attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
-                 attorney_state, attorney_zip, attorney_phone, attorney_email):
+def save_sc_subcase(n,
+                    subcase_id, file_number, filing_date,
+                    contact_name, contact_address, contact_address2, contact_city, contact_state,
+                    contact_zip, contact_phone, contact_email,
+                    attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
+                    attorney_state, attorney_zip, attorney_phone, attorney_email):
     if subcase_id is None:
         return dbc.Alert("Select a subcase first.", color="warning")
     auth.guard_edit_subcase(subcase_id)
