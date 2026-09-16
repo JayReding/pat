@@ -2,7 +2,7 @@
 import json
 import os
 import secrets
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from dash import Dash, html, dcc, callback, Output, Input, State, ALL
 from dash.exceptions import PreventUpdate
 import dash
@@ -715,6 +715,13 @@ def _account_page():
                 _cm_field('Email', "account-email", "email"),
                 dbc.Button("Save Settings", id="account-save-btn", n_clicks=0, color="primary", className="mt-2"),
                 html.Div(id="account-status", className="mt-3"),
+                html.Hr(className="mt-4"),
+                html.H5('Change Password'),
+                _cm_field('Current Password', "acct-pw-current", "password"),
+                _cm_field('New Password', "acct-pw-new", "password"),
+                _cm_field('Confirm New Password', "acct-pw-confirm", "password"),
+                dbc.Button("Change Password", id="account-pw-btn", n_clicks=0, color="secondary", className="mt-2"),
+                html.Div(id="account-pw-status", className="mt-3"),
             ]),
         ]),
     ])
@@ -1432,6 +1439,27 @@ def account_save(trigger, name, email, avatar_color):
     n_color = avatar_color if avatar_color in AVATAR_COLORS else None
     store.update_user_profile(u.id, name=n_name, email=n_email, avatar_color=n_color)
     return dbc.Alert("Settings saved.", color="success"), datetime.now().isoformat()
+
+
+@callback(
+    Output("account-pw-status", "children"),
+    Input("account-pw-btn", "n_clicks"),
+    State("acct-pw-current", "value"),
+    State("acct-pw-new", "value"),
+    State("acct-pw-confirm", "value"),
+    prevent_initial_call=True,
+)
+def account_change_password(n, current, new, confirm):
+    u = auth.current_user
+    row = store.get_user_by_id(u.id)
+    if not check_password_hash(row["password_hash"], current or ""):
+        return _cm_error_alert("Current password is incorrect.")
+    if not new:
+        return _cm_error_alert("Enter a new password.")
+    if new != confirm:
+        return _cm_error_alert("New passwords do not match.")
+    store.reset_user_password(u.id, generate_password_hash(new))
+    return dbc.Alert("Password changed.", color="success")
 
 
 @callback(
