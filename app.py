@@ -1,6 +1,8 @@
 # Import packages
 import json
 import os
+import secrets
+from werkzeug.security import generate_password_hash
 from dash import Dash, html, dcc, callback, Output, Input, State, ALL
 from dash.exceptions import PreventUpdate
 import dash
@@ -22,6 +24,23 @@ import session
 store.init_cases_db()
 store.init_state_db()
 store.init_users_db()
+
+
+def _bootstrap_admin():
+    username = os.environ.get('PAT_ADMIN_USERNAME', 'admin')
+    if store.list_users() or store.get_user_by_username(username):
+        return
+    password = secrets.token_urlsafe(12)
+    store.create_user(username, generate_password_hash(password), role='admin')
+    print("=" * 58)
+    print("First run detected. Created admin user.")
+    print(f"  Username: {username}")
+    print(f"  Password: {password}")
+    print("Save these credentials; they will not be shown again.")
+    print("=" * 58)
+
+
+_bootstrap_admin()
 
 _COURTS = json.load(open('courts.json'))
 COURT_OPTIONS = sorted(
@@ -188,7 +207,8 @@ def load_case(st, subcase_id):
 
 
 def _session_loader(st):
-    load_case(st, store.active_subcase_id())
+    if store.list_subcase_options():
+        load_case(st, store.active_subcase_id())
 
 
 session.set_loader(_session_loader)
@@ -441,8 +461,28 @@ dcc.Tab(label='Historical Period', children=[
                 ], width=9),
             ]),
         ]),
-])
-    ])
+]),
+    ]),
+dbc.Modal(
+    [
+        dbc.ModalHeader(dbc.ModalTitle("Welcome to the Preference Analysis Tool")),
+        dbc.ModalBody([
+            html.P("This appears to be the first time you are running the Preference Analysis Tool, or the case database is empty. In order to start using the Preference Analysis Tool you need to create a new main bankruptcy case. Once you have created a new case, you can begin importing your data into potential or filed preference cases."),
+            html.P("If you are seeing this message in error, contact your administrator or technical support."),
+            html.Div(style={"textAlign": "center", "marginTop": "24px"}, children=[
+                dcc.Link(dbc.Button("Proceed", color="primary", className="px-5"), href="/manage"),
+                html.Div(style={"marginTop": "12px"}, children=[
+                    dcc.Link("Technical Support", href="https://github.com/JayReding/pat", target="_blank"),
+                ]),
+            ]),
+        ]),
+    ],
+    id="welcome-modal",
+    is_open=False,
+    centered=True,
+    backdrop="static",
+    keyboard=False,
+),
 ])
 
 
@@ -496,8 +536,14 @@ def _maincase_page():
         dbc.Row([
             _manage_sidebar("main"),
             dbc.Col(width=10, children=[
-                html.H3(children='Main Case Management'),
+                html.Div(className="d-flex justify-content-between align-items-center mb-3", children=[
+                    html.H3(children='Main Case Management', style={"margin": 0}),
+                    html.Div(id="cm-new", children=[
+                        dbc.Button("New Main Case", id="cm-new-btn", n_clicks=0, color="secondary"),
+                    ]),
+                ]),
                 dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                html.Div(id="cm-status", className="mb-3"),
                 _cm_field('Case Name', "cm-case-name"),
                 _cm_field('Case Number', "cm-case-number"),
                 html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
@@ -508,7 +554,7 @@ def _maincase_page():
                 _cm_field('Judge', "cm-judge"),
                 _cm_field('Petition Date (YYYY-MM-DD)', "cm-petition-date", "date"),
                 dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
-                html.Div(id="cm-status", className="mt-3"),
+                dcc.Store(id="cm-create-mode", data=False),
             ]),
         ]),
     ])
@@ -792,6 +838,8 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
 )
 def update_ocb_grid(start, end, step, metric):
     st = session.get_state()
+    if st.df_preference is None:
+        return []
     start = int(start) if start is not None else 0
     end = int(end) if end is not None else 100
     step = int(step) if step is not None else 5
@@ -948,6 +996,8 @@ def selection_changed(main_id, subcase_id):
 )
 def apply_ocb_range(sel, metric, start, end, step):
     st = session.get_state()
+    if st.df_preference is None:
+        return analysis.ocb_default_style(), "No case loaded.", "Historical invoices captured in range: —", []
     start = int(start) if start is not None else 0
     end = int(end) if end is not None else 100
     step = int(step) if step is not None else 5
@@ -1427,7 +1477,6 @@ def admin_load(_):
 def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
                  new_name, new_pw, new_email, new_role, sel_role, reset_pw, selected):
     auth.guard("admin")
-    from werkzeug.security import generate_password_hash
     trig = dash.callback_context.triggered_id
     uid = uname = None
     if selected:
@@ -1477,6 +1526,32 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
 
 
 @callback(
+    Output("cm-create-mode", "data"),
+    Output("cm-main", "value"),
+    Output("cm-case-name", "value"),
+    Output("cm-case-number", "value"),
+    Output("cm-jurisdiction", "value"),
+    Output("cm-judge", "value"),
+    Output("cm-petition-date", "value"),
+    Input("cm-new-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def start_new_main(n_clicks):
+    return True, None, "", "", "", "", ""
+
+
+@callback(
+    Output("cm-create-mode", "data", allow_duplicate=True),
+    Input("cm-main", "value"),
+    prevent_initial_call=True,
+)
+def reset_create_mode(main_id):
+    if main_id is not None:
+        return False
+    raise PreventUpdate
+
+
+@callback(
     Output("cm-case-name", "value"),
     Output("cm-case-number", "value"),
     Output("cm-jurisdiction", "value"),
@@ -1488,18 +1563,62 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
     Output("cm-judge", "disabled"),
     Output("cm-petition-date", "disabled"),
     Output("cm-save", "disabled"),
+    Output("cm-save", "children"),
     Input("cm-main", "value"),
+    Input("cm-create-mode", "data"),
 )
-def build_cm_details(main_id):
+def build_cm_details(main_id, create_mode):
     if main_id is None:
-        return (None,) * 5 + (True,) * 6
+        if create_mode:
+            return "", "", "", "", "", False, False, False, False, False, False, "Create Main Case"
+        return (None,) * 5 + (True,) * 5 + (False, "Save Changes")
     m = store.get_main_by_id(main_id)
     can_edit = auth.can_edit_main(auth.current_user, main_id)
     return (
         m["case_name"], m["case_number"], m.get("jurisdiction") or "", m.get("judge") or "",
         m.get("petition_date") or "",
-        not can_edit, not can_edit, not can_edit, not can_edit, not can_edit, not can_edit,
+        not can_edit, not can_edit, not can_edit, not can_edit, not can_edit,
+        not can_edit, "Save Changes",
     )
+
+
+@callback(
+    Output("cm-new", "style"),
+    Input("manage-boot", "data"),
+)
+def maincase_create_gate(_):
+    if auth.current_user.role in ("admin", "case_manager"):
+        return dash.no_update
+    return {"display": "none"}
+
+
+@callback(
+    Output("cm-create-mode", "data", allow_duplicate=True),
+    Input("manage-boot", "data"),
+    prevent_initial_call='initial_duplicate',
+)
+def cm_boot_create_mode(_):
+    if auth.current_user.role not in ("admin", "case_manager"):
+        return dash.no_update
+    if store.list_main_options():
+        return dash.no_update
+    return True
+
+
+@callback(
+    Output("sc-main", "options"),
+    Input("manage-boot", "data"),
+)
+def sc_main_options_boot(_):
+    return store.list_main_options()
+
+
+@callback(
+    Output("grant-main", "options"),
+    Input("manage-boot", "data"),
+)
+def grant_main_options_boot(_):
+    return store.list_main_options()
 
 
 _SC_SUBCASE_FIELD_DEFS = [
@@ -1664,10 +1783,21 @@ def save_sc_subcase(n,
         return dbc.Alert(str(e), color="danger")
 
 
+def _cm_error_alert(message):
+    return dbc.Alert(
+        [html.I(className="fa-solid fa-circle-xmark me-2"), message],
+        color="danger",
+    )
+
+
 @callback(
     Output("cm-status", "children"),
+    Output("cm-main", "value", allow_duplicate=True),
+    Output("cm-main", "options"),
+    Output("cm-create-mode", "data", allow_duplicate=True),
     Input("cm-save", "n_clicks"),
     State("cm-main", "value"),
+    State("cm-create-mode", "data"),
     State("cm-case-name", "value"),
     State("cm-case-number", "value"),
     State("cm-jurisdiction", "value"),
@@ -1675,15 +1805,38 @@ def save_sc_subcase(n,
     State("cm-petition-date", "value"),
     prevent_initial_call=True
 )
-def save_main(n_clicks, main_id, name, number, jurisdiction, judge, petition):
+def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge, petition):
+    if create_mode:
+        user = auth.guard("admin", "case_manager")
+        try:
+            new_id = store.create_main_case(name, number, jurisdiction, judge, petition)
+        except ValueError as e:
+            status = _cm_error_alert(str(e))
+            return status, dash.no_update, dash.no_update, dash.no_update
+        if user.role == "case_manager":
+            store.grant_main(user.id, new_id)
+        status = dbc.Alert(f"Created main case. (ID {new_id})", color="success")
+        return status, new_id, store.list_main_options(), False
     if main_id is None:
-        return dbc.Alert("Select a main case first.", color="warning")
+        return dbc.Alert("Select a main case first.", color="warning"), \
+            dash.no_update, dash.no_update, dash.no_update
     auth.guard_edit_main(main_id)
     try:
         store.update_main_case(main_id, name, number, jurisdiction, judge, petition)
-        return dbc.Alert("Saved.", color="success")
     except ValueError as e:
-        return dbc.Alert(str(e), color="danger")
+        status = _cm_error_alert(str(e))
+        return status, dash.no_update, dash.no_update, dash.no_update
+    return dbc.Alert("Saved.", color="success"), \
+        dash.no_update, dash.no_update, dash.no_update
+
+
+@callback(
+    Output("cm-main", "options", allow_duplicate=True),
+    Input("manage-boot", "data"),
+    prevent_initial_call='initial_duplicate',
+)
+def cm_options_boot(_):
+    return store.list_main_options()
 
 
 @callback(
@@ -1752,6 +1905,8 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id):
 def session_boot(_):
     st = session.get_state()
     info = st.meta
+    if info is None:
+        return (dash.no_update,) * 16
     main_info = [
         html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
         html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
@@ -1775,6 +1930,22 @@ def session_boot(_):
          'step': info['ocb_step'], 'total': info['ocb_total_flag']},
         st.ocb_metric,
     )
+
+
+@callback(
+    Output("welcome-modal", "is_open"),
+    Input("auth-boot", "data"),
+)
+def welcome_modal(_):
+    return not store.list_main_options()
+
+
+@callback(
+    Output("main-selector", "options"),
+    Input("auth-boot", "data"),
+)
+def analysis_main_options_boot(_):
+    return store.list_main_options()
 
 
 # Apply login protection to every route (including Dash callbacks)

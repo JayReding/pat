@@ -533,19 +533,45 @@ def get_main_by_id(main_id):
     }
 
 
-def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petition_date):
+def _validated_main_fields(case_name, case_number, jurisdiction, judge, petition_date):
     from datetime import datetime
     name = (case_name or '').strip()
     number = (case_number or '').strip()
     petition = (petition_date or '').strip()
-    if not name or not number or not petition:
-        raise ValueError('case_name, case_number, and petition_date are required.')
+    jurisdiction = (jurisdiction or '').strip()
+    if not name or not number or not jurisdiction or not petition:
+        raise ValueError('Case Name, Case Number, Jurisdiction, and Petition Date are required.')
     try:
         datetime.strptime(petition, '%Y-%m-%d')
     except ValueError:
-        raise ValueError('petition_date must be YYYY-MM-DD.')
+        raise ValueError('Petition Date must be YYYY-MM-DD.')
     judge = (judge or '').strip() or None
-    jurisdiction = (jurisdiction or '').strip() or None
+    jurisdiction = jurisdiction or None
+    return name, number, jurisdiction, judge, petition
+
+
+def create_main_case(case_name, case_number, jurisdiction, judge, petition_date):
+    name, number, jurisdiction, judge, petition = _validated_main_fields(
+        case_name, case_number, jurisdiction, judge, petition_date)
+    conn = _connect_cases()
+    try:
+        cur = conn.execute(
+            "INSERT INTO main_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, number, jurisdiction, judge, petition,
+             datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A main case named '{name}' already exists.")
+    finally:
+        conn.close()
+    return cur.lastrowid
+
+
+def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petition_date):
+    name, number, jurisdiction, judge, petition = _validated_main_fields(
+        case_name, case_number, jurisdiction, judge, petition_date)
     conn = _connect_cases()
     try:
         conn.execute(
