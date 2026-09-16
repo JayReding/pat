@@ -1,6 +1,7 @@
 # Import packages
 import json
 import os
+import re
 import secrets
 from werkzeug.security import generate_password_hash
 from dash import Dash, html, dcc, callback, Output, Input, State, ALL
@@ -736,11 +737,15 @@ def _users_page():
                 ),
                 html.Hr(),
                 html.H6('Create user'),
-                html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
-                    html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control")]),
-                    html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control")]),
-                    html.Div(children=[html.Label('Email', htmlFor="new-user-email"), dcc.Input(id="new-user-email", type="email", className="form-control")]),
-                    html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "140px"})]),
+                html.Div(className="mt-2", style={"display": "flex", "flexDirection": "column", "alignItems": "flex-start", "gap": "12px"}, children=[
+                    html.Div(children=[html.Label('Username', htmlFor="new-user-username"), dcc.Input(id="new-user-username", type="text", className="form-control", style={"maxWidth": "320px", "width": "320px"})]),
+                    html.Div(children=[html.Label('Password', htmlFor="new-user-password"), dcc.Input(id="new-user-password", type="password", className="form-control", style={"maxWidth": "320px", "width": "320px"})]),
+                    html.Div(children=[
+                        html.Label('Email', htmlFor="new-user-email"),
+                        dcc.Input(id="new-user-email", type="email", className="form-control", style={"maxWidth": "320px", "width": "320px"}),
+                        html.Div(id="new-user-email-error", className="text-danger", style={"fontSize": "0.85rem"}),
+                    ]),
+                    html.Div(children=[html.Label('Role', htmlFor="new-user-role"), dcc.Dropdown(id="new-user-role", options=[{"label": r, "value": r} for r in auth.ROLES], value="user", style={"minWidth": "220px"})]),
                     dbc.Button("Create User", id="admin-create-btn", color="primary"),
                 ]),
                 html.Hr(),
@@ -748,9 +753,11 @@ def _users_page():
                 html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
                     html.Div(children=[html.Label('New role', htmlFor="admin-role-select"), dcc.Dropdown(id="admin-role-select", options=[{"label": r, "value": r} for r in auth.ROLES], style={"minWidth": "140px"})]),
                     html.Div(children=[html.Label('New password (reset)', htmlFor="admin-reset-pw"), dcc.Input(id="admin-reset-pw", type="password", className="form-control")]),
+                    html.Div(id="admin-firm-wrap", children=[html.Label('New firm', htmlFor="admin-firm-select"), dcc.Dropdown(id="admin-firm-select", style={"minWidth": "180px"})]),
                     dbc.Button("Set Role", id="admin-set-role-btn", color="secondary"),
                     dbc.Button("Reset Password", id="admin-reset-btn", color="secondary"),
                     dbc.Button("Activate/Deactivate", id="admin-toggle-btn", color="secondary"),
+                    dbc.Button("Change Firm", id="admin-firm-btn", color="secondary"),
                     dbc.Button("Delete User", id="admin-delete-btn", color="danger"),
                 ]),
                 html.Div(id="admin-status", className="mt-3"),
@@ -1700,15 +1707,21 @@ def admin_load(_, users_firm):
 @callback(
     Output("new-user-role", "options"),
     Output("admin-role-select", "options"),
+    Output("admin-firm-select", "options"),
+    Output("admin-firm-select", "value"),
+    Output("admin-firm-wrap", "style"),
     Input("users-boot", "data"),
 )
 def users_role_options(_):
     u = auth.current_user
     if u.role == "firm_admin":
         opts = [{"label": r, "value": r} for r in auth.ROLES if r != "admin"]
-    else:
-        opts = [{"label": r, "value": r} for r in auth.ROLES]
-    return opts, opts
+        return opts, opts, [], None, {"display": "none"}
+    opts = [{"label": r, "value": r} for r in auth.ROLES]
+    firms = store.list_firms()
+    firm_opts = [{"label": f["name"], "value": f["id"]} for f in firms]
+    value = firms[0]["id"] if firms else None
+    return opts, opts, firm_opts, value, {"display": "block"}
 
 
 @callback(
@@ -1872,12 +1885,27 @@ def delete_firm_cb(n, firm_id):
 
 
 @callback(
+    Output("new-user-email-error", "children"),
+    Input("new-user-email", "value"),
+)
+def new_user_email_validation(value):
+    value = (value or "").strip()
+    if not value:
+        return "Email is required."
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+        return "Enter a valid email address."
+    return ""
+
+
+@callback(
     Output("admin-users-grid", "rowData"),
     Output("admin-status", "children"),
+    Output("users-boot", "data", allow_duplicate=True),
     Input("admin-create-btn", "n_clicks"),
     Input("admin-set-role-btn", "n_clicks"),
     Input("admin-reset-btn", "n_clicks"),
     Input("admin-toggle-btn", "n_clicks"),
+    Input("admin-firm-btn", "n_clicks"),
     Input("admin-delete-btn", "n_clicks"),
     State("new-user-username", "value"),
     State("new-user-password", "value"),
@@ -1885,31 +1913,36 @@ def delete_firm_cb(n, firm_id):
     State("new-user-role", "value"),
     State("admin-role-select", "value"),
     State("admin-reset-pw", "value"),
+    State("admin-firm-select", "value"),
     State("admin-users-grid", "selectedRows"),
     State("users-firm-select", "value"),
     prevent_initial_call=True
 )
-def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
-                 new_name, new_pw, new_email, new_role, sel_role, reset_pw, selected, users_firm):
+def manage_users(c_create, c_role, c_reset, c_toggle, c_firm, c_delete,
+                 new_name, new_pw, new_email, new_role, sel_role, reset_pw, sel_firm, selected, users_firm):
     u = auth.guard("admin", "firm_admin")
     trig = dash.callback_context.triggered_id
     uid = uname = None
     if selected:
         uid, uname = selected[0].get("id"), selected[0].get("username")
     status = ""
+    bump = dash.no_update
 
     if trig == "admin-create-btn" and new_name and new_pw:
         name = new_name.strip()
+        email = (new_email or "").strip()
         if store.get_user_by_username(name):
             status = f"Username '{name}' already exists."
         elif u.role == "firm_admin" and (new_role or "user") == "admin":
             status = "Firm admins cannot create admin users."
+        elif not email or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            status = "Enter a valid email address."
         else:
             fid = int(users_firm) if u.role == "admin" and users_firm else auth.firm_scope(u)
-            store.create_user(name, generate_password_hash(new_pw), new_role or "user", (new_email or "").strip() or None, firm_id=fid)
+            store.create_user(name, generate_password_hash(new_pw), new_role or "user", email, firm_id=fid)
             status = f"Created user '{name}' ({new_role or 'user'})."
     elif trig == "admin-create-btn":
-        status = "Enter a username and password to create a user."
+        status = "Enter a username, password, and a valid email address to create a user."
     elif trig == "admin-set-role-btn":
         if u.role == "firm_admin" and sel_role == "admin":
             status = "Firm admins cannot assign the admin role."
@@ -1932,6 +1965,26 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
             status = f"'{uname}' {'activated' if new_active else 'deactivated'}."
         else:
             status = "Select a user."
+    elif trig == "admin-firm-btn":
+        if u.role != "admin":
+            status = "Only admins can change a user's firm."
+        elif uid is None or not sel_firm:
+            status = "Select a user and a firm."
+        else:
+            target = int(sel_firm)
+            current = store.get_user_by_id(uid)
+            if current is None:
+                status = "Select a user."
+            elif str(current["id"]) == str(auth.current_user.id):
+                status = "You cannot change your own firm."
+            elif int(current["firm_id"]) == target:
+                status = f"'{uname}' is already in that firm."
+            else:
+                store.set_user_firm(uid, target)
+                store.clear_user_grants(uid)
+                firm_name = store.get_firm(target)["name"]
+                status = f"Moved '{uname}' to '{firm_name}' (grants cleared)."
+                bump = (users_firm or 0) + 1
     elif trig == "admin-delete-btn":
         if uid is not None:
             if str(auth.current_user.id) == str(uid):
@@ -1943,7 +1996,7 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
             status = "Select a user."
 
     ret_fid = int(users_firm) if u.role == "admin" and users_firm else auth.firm_scope(u)
-    return store.list_users(firm_id=ret_fid), status
+    return store.list_users(firm_id=ret_fid), status, bump
 
 
 @callback(

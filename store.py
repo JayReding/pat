@@ -721,6 +721,22 @@ def set_user_role(user_id, role):
     conn.close()
 
 
+def set_user_firm(user_id, firm_id):
+    _require_firm(firm_id)
+    conn = _connect_users()
+    conn.execute("UPDATE users SET firm_id = ? WHERE id = ?", (int(firm_id), int(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def clear_user_grants(user_id):
+    conn = _connect_users()
+    conn.execute("DELETE FROM main_grants WHERE user_id = ?", (int(user_id),))
+    conn.execute("DELETE FROM subcase_grants WHERE user_id = ?", (int(user_id),))
+    conn.commit()
+    conn.close()
+
+
 def update_user_profile(user_id, name=None, email=None, avatar_color=None):
     conn = _connect_users()
     conn.execute(
