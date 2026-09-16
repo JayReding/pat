@@ -11,7 +11,7 @@ import dash_bootstrap_components as dbc
 
 import store
 
-ROLES = ('admin', 'case_manager', 'user')
+ROLES = ('admin', 'firm_admin', 'case_manager', 'user')
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -27,6 +27,7 @@ class User(UserMixin):
         self.name = row.get('name')
         self.avatar_color = row.get('avatar_color')
         self.active = bool(row.get('active', 1))
+        self.firm_id = row.get('firm_id')
 
     @property
     def is_active(self):
@@ -95,11 +96,23 @@ def guard(*roles):
     return current_user
 
 
+def firm_scope(user):
+    """Return the firm_id a user is scoped to; None means global (admin)."""
+    if user.role == 'admin':
+        return None
+    return int(user.firm_id or 1)
+
+
 def can_edit_main(user, main_id):
     if not user.is_authenticated:
         return False
     if user.role == 'admin':
         return True
+    if user.role == 'firm_admin':
+        try:
+            return store.get_main_by_id(main_id)['firm_id'] == firm_scope(user)
+        except ValueError:
+            return False
     if user.role != 'case_manager':
         return False
     return int(main_id) in {g['main_case_id'] for g in store.main_grants_for(user.id)}
@@ -110,12 +123,20 @@ def can_edit_subcase(user, subcase_id):
         return False
     if user.role == 'admin':
         return True
+    if user.role == 'firm_admin':
+        try:
+            return store.get_subcase(subcase_id)['firm_id'] == firm_scope(user)
+        except ValueError:
+            return False
     if user.role != 'case_manager':
         return False
     sid = int(subcase_id)
     if sid in {g['subcase_id'] for g in store.subcase_grants_for(user.id)}:
         return True
-    main_id = store.get_main_by_subcase(sid)['main_id']
+    try:
+        main_id = store.get_main_by_subcase(sid)['main_id']
+    except ValueError:
+        return False
     return int(main_id) in {g['main_case_id'] for g in store.main_grants_for(user.id)}
 
 

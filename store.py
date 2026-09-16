@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import uuid
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -38,7 +39,8 @@ def init_cases_db():
             jurisdiction   TEXT,
             judge          TEXT,
             petition_date  TEXT    NOT NULL,
-            created_at     TEXT    NOT NULL
+            created_at     TEXT    NOT NULL,
+            firm_id        INTEGER NOT NULL DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS subcases (
             id                INTEGER PRIMARY KEY,
@@ -47,11 +49,13 @@ def init_cases_db():
             adversary_number  TEXT,
             created_at        TEXT    NOT NULL,
             meta              TEXT,
+            firm_id           INTEGER NOT NULL DEFAULT 1,
             UNIQUE(main_case_id, adversary_number)
         );
         CREATE TABLE IF NOT EXISTS invoice_records (
             id                  INTEGER PRIMARY KEY,
             subcase_id          INTEGER NOT NULL REFERENCES subcases(id) ON DELETE CASCADE,
+            firm_id             INTEGER NOT NULL DEFAULT 1,
             "Transfer Number"   TEXT,
             "Transfer Amount"   REAL,
             "Invoice Number"    TEXT,
@@ -70,6 +74,16 @@ def init_cases_db():
             "Check Date"        TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_invoices_subcase ON invoice_records(subcase_id);
+    ''')
+    for table in ('main_cases', 'subcases', 'invoice_records'):
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if 'firm_id' not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN firm_id INTEGER NOT NULL DEFAULT 1")
+    conn.commit()
+    conn.executescript('''
+        CREATE INDEX IF NOT EXISTS idx_main_cases_firm ON main_cases(firm_id);
+        CREATE INDEX IF NOT EXISTS idx_subcases_firm ON subcases(firm_id);
+        CREATE INDEX IF NOT EXISTS idx_invoices_firm ON invoice_records(firm_id);
     ''')
     cols = {row[1] for row in conn.execute("PRAGMA table_info(subcases)").fetchall()}
     if 'file_number' not in cols:
@@ -128,8 +142,10 @@ def _display_number(adversary_number, filing_date, file_number):
 def get_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute(
-        "SELECT id, main_case_id, transferee_name, adversary_number, file_number, filing_date, meta "
-        "FROM subcases WHERE id = ?", (int(subcase_id),)
+        "SELECT s.id, s.main_case_id, s.transferee_name, s.adversary_number, s.file_number, "
+        "s.filing_date, s.meta, m.firm_id "
+        "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
+        "WHERE s.id = ?", (int(subcase_id),)
     ).fetchone()
     conn.close()
     if row is None:
@@ -142,6 +158,7 @@ def get_subcase(subcase_id):
         'adversary_number': row[3] or '',
         'file_number': row[4] or '',
         'filing_date': row[5] or '',
+        'firm_id': row[7],
     }
     result['display_number'] = _display_number(result['adversary_number'], result['filing_date'], result['file_number'])
     for key in (_META_KEYS):
@@ -213,27 +230,58 @@ def init_state_db():
     scols = {row[1] for row in cur.execute("PRAGMA table_info(case_settings)").fetchall()}
     if 'ocb_metric' not in scols:
         cur.execute("ALTER TABLE case_settings ADD COLUMN ocb_metric TEXT")
-    cur.execute('''CREATE TABLE IF NOT EXISTS app_state (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        active_subcase_id INTEGER
-    )''')
-    cur.execute("INSERT OR IGNORE INTO app_state (id, active_subcase_id) VALUES (1, 1)")
+    acols = {row[1] for row in cur.execute("PRAGMA table_info(app_state)").fetchall()}
+    if acols and 'firm_id' not in acols:
+        cur.execute("ALTER TABLE app_state RENAME TO app_state_legacy")
+        cur.execute('''CREATE TABLE app_state (
+            firm_id          INTEGER PRIMARY KEY,
+            active_subcase_id INTEGER
+        )''')
+        cur.execute(
+            "INSERT OR IGNORE INTO app_state (firm_id, active_subcase_id) "
+            "SELECT 1, active_subcase_id FROM app_state_legacy WHERE id = 1")
+        cur.execute("DROP TABLE app_state_legacy")
+    else:
+        cur.execute('''CREATE TABLE IF NOT EXISTS app_state (
+            firm_id          INTEGER PRIMARY KEY,
+            active_subcase_id INTEGER
+        )''')
+    cur.execute("INSERT OR IGNORE INTO app_state (firm_id, active_subcase_id) VALUES (1, 1)")
     cur.execute("DROP TABLE IF EXISTS cases")
     conn.commit()
     return conn
 
 
-def active_subcase_id():
+def active_subcase_id(firm_id=1):
+    firm_id = int(firm_id or 1)
     conn = _connect_state()
-    row = conn.execute("SELECT active_subcase_id FROM app_state WHERE id = 1").fetchone()
+    row = conn.execute(
+        "SELECT active_subcase_id FROM app_state WHERE firm_id = ?", (firm_id,)).fetchone()
     conn.close()
-    subcase_id = row[0] if row and row[0] is not None else 1
-    return subcase_id if subcase_exists(subcase_id) else 1
+    subcase_id = row[0] if row and row[0] is not None else None
+    if subcase_id is not None and _subcase_in_firm(subcase_id, firm_id):
+        return subcase_id
+    opts = list_subcase_options(firm_id=firm_id)
+    return opts[0]["value"] if opts else 1
 
 
-def save_app_state(subcase_id):
+def _subcase_in_firm(subcase_id, firm_id):
+    conn = _connect_cases()
+    try:
+        row = conn.execute(
+            "SELECT m.firm_id FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
+            "WHERE s.id = ?", (int(subcase_id),)).fetchone()
+    finally:
+        conn.close()
+    return bool(row and row[0] == int(firm_id))
+
+
+def save_app_state(subcase_id, firm_id=1):
     conn = _connect_state()
-    conn.execute("UPDATE app_state SET active_subcase_id = ? WHERE id = 1", (int(subcase_id),))
+    conn.execute(
+        "INSERT INTO app_state (firm_id, active_subcase_id) VALUES (?, ?) "
+        "ON CONFLICT(firm_id) DO UPDATE SET active_subcase_id = excluded.active_subcase_id",
+        (int(firm_id or 1), int(subcase_id)))
     conn.commit()
     conn.close()
 
@@ -245,27 +293,36 @@ def subcase_exists(subcase_id):
     return bool(row[0])
 
 
-def list_main_options():
+def list_main_options(firm_id=None):
     conn = _connect_cases()
-    rows = conn.execute('''
-        SELECT id, case_name, case_number
-        FROM main_cases
-        ORDER BY id
-    ''').fetchall()
+    sql = 'SELECT id, case_name, case_number FROM main_cases'
+    params = ()
+    if firm_id is not None:
+        sql += ' WHERE firm_id = ?'
+        params = (int(firm_id),)
+    sql += ' ORDER BY id'
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [{"label": f"{name} (#{number})", "value": mid} for mid, name, number in rows]
 
 
-def list_subcase_options(main_id=None):
+def list_subcase_options(main_id=None, firm_id=None):
     conn = _connect_cases()
     sql = '''
         SELECT s.id, s.transferee_name, s.adversary_number, s.file_number, s.filing_date
         FROM subcases s
     '''
-    params = ()
+    params = []
+    where = []
+    if firm_id is not None:
+        sql += ' JOIN main_cases m ON m.id = s.main_case_id'
+        where.append('m.firm_id = ?')
+        params.append(int(firm_id))
     if main_id is not None:
-        sql += ' WHERE s.main_case_id = ?'
-        params = (int(main_id),)
+        where.append('s.main_case_id = ?')
+        params.append(int(main_id))
+    if where:
+        sql += ' WHERE ' + ' AND '.join(where)
     sql += ' ORDER BY s.id'
     rows = conn.execute(sql, params).fetchall()
     conn.close()
@@ -281,7 +338,7 @@ def get_main_by_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute('''
         SELECT m.id, m.case_name, m.case_number, m.jurisdiction, m.judge, m.petition_date,
-               s.transferee_name, s.adversary_number, s.file_number, s.filing_date
+               s.transferee_name, s.adversary_number, s.file_number, s.filing_date, m.firm_id
         FROM subcases s JOIN main_cases m ON m.id = s.main_case_id
         WHERE s.id = ?
     ''', (int(subcase_id),)).fetchone()
@@ -299,24 +356,33 @@ def get_main_by_subcase(subcase_id):
         'adversary_number': row[7],
         'file_number': row[8],
         'filing_date': row[9],
+        'firm_id': row[10],
     }
 
 
-def load_case_frames(subcase_id, pref_start, petition_date):
+def load_case_frames(subcase_id, pref_start, petition_date, firm_id=None):
     conn = _connect_cases()
+    firm_clause = ''
+    firm_params = ()
+    if firm_id is not None:
+        firm_clause = (
+            ' AND EXISTS (SELECT 1 FROM subcases s JOIN main_cases m ON m.id = s.main_case_id '
+            'WHERE s.id = invoice_records.subcase_id AND m.firm_id = ?)'
+        )
+        firm_params = (int(firm_id),)
     historical = pd.read_sql(
-        'SELECT * FROM invoice_records WHERE subcase_id = ? AND "Payment Date" < ?',
-        conn, params=(int(subcase_id), pref_start))
+        'SELECT * FROM invoice_records WHERE subcase_id = ? AND "Payment Date" < ?' + firm_clause,
+        conn, params=(int(subcase_id), pref_start) + firm_params)
     preference = pd.read_sql(
-        'SELECT * FROM invoice_records WHERE subcase_id = ? AND "Payment Date" >= ? AND "Payment Date" <= ?',
-        conn, params=(int(subcase_id), pref_start, petition_date))
+        'SELECT * FROM invoice_records WHERE subcase_id = ? AND "Payment Date" >= ? AND "Payment Date" <= ?' + firm_clause,
+        conn, params=(int(subcase_id), pref_start, petition_date) + firm_params)
     transfers = pd.read_sql(
         'SELECT DISTINCT "Transfer Number", "Transfer Amount", "Payment Date" FROM invoice_records '
-        'WHERE subcase_id = ? AND "Payment Date" >= ? AND "Payment Date" <= ? ORDER BY "Payment Date"',
-        conn, params=(int(subcase_id), pref_start, petition_date))
+        'WHERE subcase_id = ? AND "Payment Date" >= ? AND "Payment Date" <= ?' + firm_clause + ' ORDER BY "Payment Date"',
+        conn, params=(int(subcase_id), pref_start, petition_date) + firm_params)
     newvalue = pd.read_sql(
-        'SELECT * FROM invoice_records WHERE subcase_id = ? AND "Unpaid" = 1',
-        conn, params=(int(subcase_id),))
+        'SELECT * FROM invoice_records WHERE subcase_id = ? AND "Unpaid" = 1' + firm_clause,
+        conn, params=(int(subcase_id),) + firm_params)
     conn.close()
     return {
         'historical': historical,
@@ -398,6 +464,16 @@ def _migrate_main_grant_names(conn):
     conn.commit()
 
 
+def _require_firm(firm_id):
+    conn = _connect_users()
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM firms WHERE id = ?", (int(firm_id),)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        raise ValueError(f"No firm with id {firm_id}")
+
+
 def init_users_db():
     conn = _connect_users()
     _migrate_main_grant_names(conn)
@@ -409,7 +485,8 @@ def init_users_db():
             role          TEXT NOT NULL,
             email         TEXT,
             active        INTEGER NOT NULL DEFAULT 1,
-            created_at    TEXT NOT NULL
+            created_at    TEXT NOT NULL,
+            firm_id       INTEGER NOT NULL DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS main_grants (
             user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -421,12 +498,24 @@ def init_users_db():
             subcase_id INTEGER NOT NULL,
             PRIMARY KEY (user_id, subcase_id)
         );
+        CREATE TABLE IF NOT EXISTS firms (
+            id         INTEGER PRIMARY KEY,
+            name       TEXT NOT NULL UNIQUE,
+            settings   TEXT,
+            created_at TEXT NOT NULL
+        );
     ''')
     ucols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if 'name' not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
     if 'avatar_color' not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN avatar_color TEXT")
+    if 'firm_id' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN firm_id INTEGER NOT NULL DEFAULT 1")
+    conn.execute(
+        "INSERT OR IGNORE INTO firms (id, name, settings, created_at) "
+        "VALUES (1, 'Default Firm LLP', '{}', ?)",
+        (datetime.now(timezone.utc).isoformat(),))
     conn.commit()
     return conn
 
@@ -453,24 +542,176 @@ def get_user_by_id(user_id):
     return _row_to_dict(columns, row)
 
 
-def create_user(username, password_hash, role='user', email=None):
+def create_user(username, password_hash, role='user', email=None, firm_id=1):
+    _require_firm(firm_id)
     conn = _connect_users()
     conn.execute(
-        "INSERT INTO users (username, password_hash, role, email, active, created_at) "
-        "VALUES (?, ?, ?, ?, 1, ?)",
-        (username, password_hash, role, email, datetime.now(timezone.utc).isoformat()),
+        "INSERT INTO users (username, password_hash, role, email, active, created_at, firm_id) "
+        "VALUES (?, ?, ?, ?, 1, ?, ?)",
+        (username, password_hash, role, email, datetime.now(timezone.utc).isoformat(), int(firm_id)),
     )
     conn.commit()
     conn.close()
 
 
-def list_users():
+def list_users(firm_id=None):
     conn = _connect_users()
-    rows = conn.execute(
-        "SELECT id, username, role, email, active, created_at FROM users ORDER BY username"
-    ).fetchall()
+    sql = "SELECT id, username, role, email, active, created_at, firm_id FROM users"
+    params = ()
+    if firm_id is not None:
+        sql += " WHERE firm_id = ?"
+        params = (int(firm_id),)
+    sql += " ORDER BY username"
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
-    return [dict(zip(("id", "username", "role", "email", "active", "created_at"), r)) for r in rows]
+    return [dict(zip(("id", "username", "role", "email", "active", "created_at", "firm_id"), r)) for r in rows]
+
+
+def list_firms():
+    conn = _connect_users()
+    rows = conn.execute("SELECT id, name, settings, created_at FROM firms ORDER BY id").fetchall()
+    conn.close()
+    return [
+        {'id': r[0], 'name': r[1], 'settings': json.loads(r[2]) if r[2] else {}, 'created_at': r[3]}
+        for r in rows
+    ]
+
+
+def get_firm(firm_id):
+    conn = _connect_users()
+    row = conn.execute(
+        "SELECT id, name, settings, created_at FROM firms WHERE id = ?", (int(firm_id),)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise ValueError(f"No firm with id {firm_id}")
+    return {
+        'id': row[0],
+        'name': row[1],
+        'settings': json.loads(row[2]) if row[2] else {},
+        'created_at': row[3],
+    }
+
+
+def update_firm_settings(firm_id, name=None, settings=None):
+    firm = get_firm(int(firm_id))
+    n_name = (name or '').strip() or firm['name']
+    n_settings = settings if settings is not None else firm['settings']
+    conn = _connect_users()
+    try:
+        conn.execute(
+            "UPDATE firms SET name = ?, settings = ? WHERE id = ?",
+            (n_name, json.dumps(n_settings), int(firm_id)),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A firm named '{n_name}' already exists.")
+    finally:
+        conn.close()
+
+
+def create_firm(name=None):
+    conn = _connect_users()
+    n_name = (name or '').strip()
+    try:
+        if n_name:
+            cur = conn.execute(
+                "INSERT INTO firms (name, settings, created_at) VALUES (?, ?, ?)",
+                (n_name, '{}', datetime.now(timezone.utc).isoformat()),
+            )
+            new_id = cur.lastrowid
+        else:
+            cur = conn.execute(
+                "INSERT INTO firms (name, settings, created_at) VALUES (?, ?, ?)",
+                (f'__new_{uuid.uuid4().hex}', '{}', datetime.now(timezone.utc).isoformat()),
+            )
+            new_id = cur.lastrowid
+            conn.execute("UPDATE firms SET name = ? WHERE id = ?", (f"New Firm {new_id}", new_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A firm named '{n_name}' already exists.")
+    finally:
+        conn.close()
+    return new_id
+
+
+def delete_firm(firm_id):
+    """Delete a firm and all of its data across all databases.
+
+    Raises ValueError if the firm is not found or is the last remaining firm.
+    Returns the firm name that was deleted (for status messages).
+    """
+    firm_id = int(firm_id)
+    uc = _connect_users()
+    try:
+        row = uc.execute("SELECT name FROM firms WHERE id = ?", (firm_id,)).fetchone()
+        if not row:
+            raise ValueError("Firm not found.")
+        old_name = row[0]
+        total = uc.execute("SELECT COUNT(*) FROM firms").fetchone()[0]
+        if total <= 1:
+            raise ValueError("Cannot delete the last firm.")
+        cc = _connect_cases()
+        sc = _connect_state()
+        try:
+            main_ids = [r[0] for r in cc.execute(
+                "SELECT id FROM main_cases WHERE firm_id = ?", (firm_id,)
+            ).fetchall()]
+            sub_ids = [r[0] for r in cc.execute(
+                "SELECT s.id FROM subcases s "
+                "JOIN main_cases m ON m.id = s.main_case_id "
+                "WHERE m.firm_id = ?", (firm_id,)
+            ).fetchall()]
+
+            if sub_ids:
+                cc.executemany(
+                    "DELETE FROM invoice_records WHERE subcase_id = ?",
+                    [(i,) for i in sub_ids],
+                )
+            user_ids = [r[0] for r in uc.execute(
+                "SELECT id FROM users WHERE firm_id = ?", (firm_id,)
+            ).fetchall()]
+            if user_ids:
+                uc.executemany(
+                    "DELETE FROM main_grants WHERE user_id = ?",
+                    [(u,) for u in user_ids],
+                )
+                uc.executemany(
+                    "DELETE FROM subcase_grants WHERE user_id = ?",
+                    [(u,) for u in user_ids],
+                )
+            if main_ids:
+                uc.executemany(
+                    "DELETE FROM main_grants WHERE main_case_id = ?",
+                    [(m,) for m in main_ids],
+                )
+            if sub_ids:
+                uc.executemany(
+                    "DELETE FROM subcase_grants WHERE subcase_id = ?",
+                    [(s,) for s in sub_ids],
+                )
+            uc.execute("DELETE FROM users WHERE firm_id = ?", (firm_id,))
+            if main_ids:
+                cc.executemany(
+                    "DELETE FROM subcases WHERE main_case_id = ?",
+                    [(m,) for m in main_ids],
+                )
+                cc.executemany(
+                    "DELETE FROM main_cases WHERE id = ?",
+                    [(m,) for m in main_ids],
+                )
+            sc.execute("DELETE FROM app_state WHERE firm_id = ?", (firm_id,))
+            uc.execute("DELETE FROM firms WHERE id = ?", (firm_id,))
+
+            cc.commit()
+            sc.commit()
+            uc.commit()
+        finally:
+            cc.close()
+            sc.close()
+    finally:
+        uc.close()
+    return old_name
 
 
 def set_user_role(user_id, role):
@@ -516,7 +757,7 @@ def delete_user(user_id):
 def get_main_by_id(main_id):
     conn = _connect_cases()
     row = conn.execute(
-        "SELECT id, case_name, case_number, jurisdiction, judge, petition_date, created_at "
+        "SELECT id, case_name, case_number, jurisdiction, judge, petition_date, created_at, firm_id "
         "FROM main_cases WHERE id = ?", (int(main_id),)
     ).fetchone()
     conn.close()
@@ -530,6 +771,7 @@ def get_main_by_id(main_id):
         'judge': row[4],
         'petition_date': row[5],
         'created_at': row[6],
+        'firm_id': row[7],
     }
 
 
@@ -550,16 +792,17 @@ def _validated_main_fields(case_name, case_number, jurisdiction, judge, petition
     return name, number, jurisdiction, judge, petition
 
 
-def create_main_case(case_name, case_number, jurisdiction, judge, petition_date):
+def create_main_case(case_name, case_number, jurisdiction, judge, petition_date, firm_id=1):
     name, number, jurisdiction, judge, petition = _validated_main_fields(
         case_name, case_number, jurisdiction, judge, petition_date)
+    _require_firm(firm_id)
     conn = _connect_cases()
     try:
         cur = conn.execute(
-            "INSERT INTO main_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO main_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at, firm_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (name, number, jurisdiction, judge, petition,
-             datetime.now(timezone.utc).isoformat()),
+             datetime.now(timezone.utc).isoformat(), int(firm_id)),
         )
         conn.commit()
     except sqlite3.IntegrityError:
@@ -644,17 +887,25 @@ def subcase_grants_for(user_id):
     return [{'subcase_id': r[0]} for r in rows]
 
 
-def list_all_grants():
+def list_all_grants(user_ids=None):
     conn = _connect_users()
-    rows = conn.execute(
-        'SELECT * FROM ('
-        'SELECT mg.user_id, u.username, mg.main_case_id, NULL AS subcase_id, "main" AS level '
-        'FROM main_grants mg JOIN users u ON u.id = mg.user_id '
-        'UNION ALL '
-        'SELECT sg.user_id, u.username, NULL, sg.subcase_id, "subcase" AS level '
-        'FROM subcase_grants sg JOIN users u ON u.id = sg.user_id'
-        ') ORDER BY username, level, COALESCE(main_case_id, subcase_id)'
-    ).fetchall()
+    sql = ('SELECT * FROM ('
+           'SELECT mg.user_id, u.username, mg.main_case_id, NULL AS subcase_id, "main" AS level '
+           'FROM main_grants mg JOIN users u ON u.id = mg.user_id '
+           'UNION ALL '
+           'SELECT sg.user_id, u.username, NULL, sg.subcase_id, "subcase" AS level '
+           'FROM subcase_grants sg JOIN users u ON u.id = sg.user_id'
+           ')')
+    params = ()
+    if user_ids is not None:
+        ids = [int(i) for i in user_ids]
+        if not ids:
+            conn.close()
+            return []
+        sql += f' WHERE user_id IN ({", ".join("?" for _ in ids)})'
+        params = tuple(ids)
+    sql += ' ORDER BY username, level, COALESCE(main_case_id, subcase_id)'
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [
         {'user_id': r[0], 'username': r[1], 'main_case_id': r[2], 'subcase_id': r[3], 'level': r[4]}

@@ -116,14 +116,21 @@ def _state_options_for(extra):
     return values + [{"label": "✏️ Type your own state…", "value": CUSTOM_STATE_KEY}]
 
 
-def load_case(st, subcase_id):
+def load_case(st, subcase_id, firm_id=None):
+    if firm_id is None:
+        try:
+            firm_id = auth.firm_scope(auth.current_user)
+        except Exception:
+            pass
     main = store.get_main_by_subcase(subcase_id)
+    if firm_id is not None and main['firm_id'] != firm_id:
+        raise PreventUpdate
     petition_date = pd.Timestamp(main['petition_date'])
     pref_start = petition_date - pd.Timedelta(days=90)
     s = pref_start.strftime('%Y-%m-%d')
     p = petition_date.strftime('%Y-%m-%d')
 
-    frames = store.load_case_frames(subcase_id, s, p)
+    frames = store.load_case_frames(subcase_id, s, p, firm_id=firm_id)
     st.df_historical = frames['historical']
     st.df_preference = frames['preference']
     st.df_transfers = frames['transfers']
@@ -207,8 +214,12 @@ def load_case(st, subcase_id):
 
 
 def _session_loader(st):
-    if store.list_subcase_options():
-        load_case(st, store.active_subcase_id())
+    try:
+        scope = auth.firm_scope(auth.current_user)
+    except Exception:
+        scope = 1
+    if store.list_subcase_options(firm_id=scope):
+        load_case(st, store.active_subcase_id(firm_id=scope), firm_id=scope)
 
 
 session.set_loader(_session_loader)
@@ -251,16 +262,16 @@ def _analysis_page():
     }, children=[
         html.Div(id="main-info", children=[]),
         html.Div(style={"display": "flex", "gap": "16px", "alignItems": "flex-end", "flexWrap": "wrap"}, children=[
-            html.Div(children=[
-                html.Label('Main Bankruptcy Case', htmlFor="main-selector"),
-                dcc.Dropdown(
-                    id="main-selector",
-                    options=store.list_main_options(),
-                    value=None,
-                    clearable=False,
-                    style={"width": "300px"},
-                ),
-            ]),
+html.Div(children=[
+                    html.Label('Main Bankruptcy Case', htmlFor="main-selector"),
+                    dcc.Dropdown(
+                        id="main-selector",
+                        options=[],
+                        value=None,
+                        clearable=False,
+                        style={"width": "300px"},
+                    ),
+                ]),
             html.Div(children=[
                 html.Label('Subcase', htmlFor="subcase-selector"),
                 dcc.Dropdown(
@@ -514,11 +525,75 @@ def _manage_header():
     ])
 
 
+def _firm_picker(prefix, label="Firm"):
+    return html.Div(
+        id=f"{prefix}-firm-wrap",
+        style={"display": "none", "maxWidth": "640px", "marginBottom": "16px"},
+        children=[
+            html.Label(label, htmlFor=f"{prefix}-firm-select", style={"fontWeight": "600"}),
+            dcc.Dropdown(id=f"{prefix}-firm-select", clearable=False),
+        ],
+    )
+
+
+def _make_firm_init(prefix):
+    @callback(
+        Output(f"{prefix}-firm-select", "options"),
+        Output(f"{prefix}-firm-select", "value"),
+        Output(f"{prefix}-firm-wrap", "style"),
+        Input("manage-boot", "data"),
+        prevent_initial_call='initial_duplicate',
+    )
+    def _firm_init(_):
+        u = auth.current_user
+        if u.role == "admin":
+            firms = store.list_firms()
+            opts = [{"label": f["name"], "value": f["id"]} for f in firms]
+            value = firms[0]["id"] if firms else 1
+            wrap = {"display": "block", "maxWidth": "640px", "marginBottom": "16px"}
+        elif u.role == "firm_admin":
+            fid = auth.firm_scope(u)
+            firm = store.get_firm(fid)
+            opts = [{"label": firm["name"], "value": fid}]
+            value = fid
+            wrap = {"display": "none"}
+        else:
+            opts, value, wrap = [], None, {"display": "none"}
+        return opts, value, wrap
+    return _firm_init
+
+
+def _make_firm_options(prefix, out_id):
+    @callback(
+        Output(out_id, "options"),
+        Output(out_id, "value", allow_duplicate=True),
+        Input(f"{prefix}-firm-select", "value"),
+        State(out_id, "value"),
+        prevent_initial_call='initial_duplicate',
+    )
+    def _firm_options(selected, current):
+        u = auth.current_user
+        scope = selected if u.role == "admin" else auth.firm_scope(u)
+        opts = store.list_main_options(firm_id=scope)
+        ids = {o["value"] for o in opts}
+        new_value = current if current in ids else None
+        return opts, new_value
+    return _firm_options
+
+_make_firm_init("cm")
+_make_firm_init("sc")
+_make_firm_init("users")
+_make_firm_options("cm", "cm-main")
+_make_firm_options("sc", "sc-main")
+_make_firm_options("users", "grant-main")
+
+
 def _manage_sidebar(active):
     return dbc.Col(width=2, style={"borderRight": "1px solid var(--bs-border-color)", "padding": "16px"}, children=[
         dbc.Nav([
             html.Div("My Account", className="sidebar-heading mb-1 mt-1 px-3 text-uppercase small fw-bold text-muted"),
             dbc.NavLink("Account Settings", href="/manage/account", active=(active == "account"), className="mb-2"),
+            dbc.NavLink("Firm Options", id="firm-options-nav-btn", href="/manage/firm-options", active=(active == "firm-options"), className="mb-2"),
             html.Div("Case Management", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
             dbc.NavLink("Main Case Management", href="/manage", active=(active == "main"), className="mb-2"),
             dbc.NavLink("Subcase Management", href="/manage/subcases", active=(active == "subcase"), className="mb-2"),
@@ -539,7 +614,8 @@ def _maincase_page():
                 html.Div(className="d-flex justify-content-between align-items-center mb-3", children=[
                     html.H3(children='Main Case Management', style={"margin": 0}),
                 ]),
-                dcc.Dropdown(id="cm-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                _firm_picker("cm"),
+                dcc.Dropdown(id="cm-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 html.Div(id="cm-new", children=[
                     dbc.Button("New Main Case", id="cm-new-btn", n_clicks=0, color="secondary"),
                 ]),
@@ -569,7 +645,8 @@ def _subcase_page():
             _manage_sidebar("subcase"),
             dbc.Col(width=10, children=[
                 html.H3(children='Subcase Management'),
-                dcc.Dropdown(id="sc-main", options=store.list_main_options(), clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                _firm_picker("sc"),
+                dcc.Dropdown(id="sc-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 html.H5('Subcase Details', className="mt-3"),
                 dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
@@ -637,12 +714,14 @@ def _users_page():
             dbc.Col(width=10, children=[
                 html.H3(children='User Management'),
                 html.Div(className="text-muted mb-3", id="admin-notice"),
+                _firm_picker("users"),
                 dag.AgGrid(
                     id="admin-users-grid",
                     dashGridOptions={"rowSelection": "single"},
                     columnDefs=[
                         {"field": "username", "headerName": "Username"},
                         {"field": "role", "headerName": "Role"},
+                        {"field": "firm_name", "headerName": "Firm"},
                         {"field": "email", "headerName": "Email"},
                         {"field": "active", "headerName": "Active"},
                         {"field": "created_at", "headerName": "Created At"},
@@ -673,7 +752,7 @@ def _users_page():
                 html.P('Grant a user access to a main case (covers all its subcases) or to a single subcase. Roles: case_manager may edit granted cases; user may view.', className="text-muted small"),
                 html.Div(className="mt-2", style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"}, children=[
                     html.Div(children=[html.Label('User', htmlFor="grant-user"), dcc.Dropdown(id="grant-user", style={"minWidth": "160px"})]),
-                    html.Div(children=[html.Label('Main case', htmlFor="grant-main"), dcc.Dropdown(id="grant-main", options=store.list_main_options(), style={"minWidth": "260px"})]),
+                    html.Div(children=[html.Label('Main case', htmlFor="grant-main"), dcc.Dropdown(id="grant-main", options=[], style={"minWidth": "260px"})]),
                     html.Div(children=[html.Label('Subcase', htmlFor="grant-subcase"), dcc.Dropdown(id="grant-subcase", style={"minWidth": "220px"})]),
                     dbc.Button("Grant Main Case", id="grant-main-btn", color="secondary"),
                     dbc.Button("Revoke Main Case", id="revoke-main-btn", color="secondary"),
@@ -720,6 +799,65 @@ def _account_page():
     ])
 
 
+def _firm_options_page():
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
+        _manage_header(),
+        dcc.Store(id="manage-boot", data=True),
+        dcc.Store(id="firm-options-boot", data=True),
+        dcc.Store(id="firm-save-trigger", data=0),
+        html.Hr(),
+        dbc.Row([
+            _manage_sidebar("firm-options"),
+            dbc.Col(width=10, children=[
+                html.H3(children='Firm Options'),
+                html.P('Manage your firm settings. Changes apply only to the selected firm.', className="text-muted"),
+                html.Div(id="firm-options-firm-wrap", style={"display": "none"}, children=[
+                    html.Label('Firm', htmlFor="firm-options-firm", style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="firm-options-firm", clearable=False,
+                                 style={"maxWidth": "640px", "marginBottom": "16px"}),
+                ]),
+                html.Div(id="firm-options-new-wrap", style={"display": "none"}, children=[
+                    html.H6('Create firm'),
+                    html.Div(className="d-flex gap-2 align-items-center flex-wrap", children=[
+                        dbc.Button("Create Firm", id="firm-options-new-btn", color="secondary"),
+                        html.Span('New firms are created as "New Firm <id>" and renamed below.',
+                                  className="text-muted"),
+                    ]),
+                ]),
+                _cm_field('Firm Name', "firm-options-name"),
+                dbc.Button("Save Firm Options", id="firm-options-save", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(id="firm-options-status", className="mt-3"),
+                html.Div(id="firm-delete-wrap", style={"display": "none", "marginTop": "28px"}, children=[
+                    html.Hr(),
+                    html.H6('Delete firm'),
+                    html.P('Permanently removes the firm and all of its users and case data. '
+                           'This cannot be undone.', className="text-muted"),
+                    dbc.Button("Delete Firm", id="firm-delete-btn", color="danger"),
+                ]),
+            ]),
+        ]),
+        dbc.Modal(
+            id="firm-delete-modal",
+            is_open=False,
+            centered=True,
+            children=[
+                dbc.ModalHeader(dbc.ModalTitle("Confirm delete firm")),
+                dbc.ModalBody([
+                    html.P('Are you sure you want to permanently delete '),
+                    html.Blockquote(html.Span(id="firm-delete-firm-name", style={"fontWeight": "600"})),
+                    html.P('This will remove the firm, all of its users, main cases, subcases, '
+                           'invoices, grants, and per-firm state. It cannot be undone.',
+                           className="text-muted"),
+                ]),
+                dbc.ModalFooter([
+                    dbc.Button("Cancel", id="firm-delete-cancel", className="ms-auto", color="secondary"),
+                    dbc.Button("Delete Firm", id="firm-delete-confirm", color="danger"),
+                ]),
+            ],
+        ),
+    ])
+
+
 def _shell():
     return html.Div(children=[
         dbc.Navbar(
@@ -747,6 +885,7 @@ def _shell():
 
 dash.register_page("analysis", path="/", layout=_analysis_page(), title="Preference Analysis Tool", name="Analysis")
 dash.register_page("account", path="/manage/account", layout=_account_page(), title="Account Settings", name="Account Settings")
+dash.register_page("firm-options", path="/manage/firm-options", layout=_firm_options_page(), title="Firm Options", name="Firm Options")
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
 dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
@@ -916,8 +1055,9 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
     return {"start": sel["start"], "end": idx}, start, end, step, False
 
 def _load_subcase_payload(st, subcase_id):
-    info = load_case(st, subcase_id)
-    store.save_app_state(subcase_id)
+    scope = auth.firm_scope(auth.current_user)
+    info = load_case(st, subcase_id, firm_id=scope)
+    store.save_app_state(subcase_id, firm_id=scope or 1)
     st = session.get_state()
     main_info = [
         html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
@@ -952,9 +1092,10 @@ def _load_subcase_payload(st, subcase_id):
 def selection_changed(main_id, subcase_id):
     trig = dash.callback_context.triggered[0]["prop_id"]
     no_update = dash.no_update
+    scope = auth.firm_scope(auth.current_user)
 
     if trig == "main-selector.value":
-        opts = store.list_subcase_options(main_id)
+        opts = store.list_subcase_options(main_id, firm_id=scope)
         st = session.get_state()
         sub_ids = {o["value"] for o in opts}
         if st.meta and st.meta.get("main_id") == main_id and st.active_subcase_id in sub_ids:
@@ -1359,12 +1500,13 @@ def update_user_badge(_boot, _saved):
 
 @callback(
     Output("admin-nav-btn", "style"),
+    Output("firm-options-nav-btn", "style"),
     Input("manage-boot", "data"),
 )
 def manage_admin_gate(_):
-    if auth.current_user.role == "admin":
-        return dash.no_update
-    return {"display": "none"}
+    if auth.current_user.role in ("admin", "firm_admin"):
+        return dash.no_update, dash.no_update
+    return {"display": "none"}, {"display": "none"}
 
 
 def _avatar_swatches(selected_color):
@@ -1449,12 +1591,197 @@ def _arm_account_save(n):
     Output("grants-grid", "rowData", allow_duplicate=True),
     Output("grant-user", "options"),
     Input("users-boot", "data"),
-    prevent_initial_call='initial_duplicate'
+    Input("users-firm-select", "value"),
+    prevent_initial_call=True
 )
-def admin_load(_):
+def admin_load(_, users_firm):
+    u = auth.guard("admin", "firm_admin")
+    if u.role == "admin":
+        if not users_firm:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        scope = int(users_firm)
+    else:
+        scope = auth.firm_scope(u)
+    users = store.list_users(firm_id=scope)
+    firms = {f["id"]: f["name"] for f in store.list_firms()}
+    for row in users:
+        row["firm_name"] = firms.get(row["firm_id"], "")
+    user_map = [{"label": u2["username"], "value": u2["id"]} for u2 in users]
+    return users, f"Managing users as {auth.current_user.username}.", store.list_all_grants(user_ids=[x["id"] for x in users]), user_map
+
+
+@callback(
+    Output("new-user-role", "options"),
+    Output("admin-role-select", "options"),
+    Input("users-boot", "data"),
+)
+def users_role_options(_):
+    u = auth.current_user
+    if u.role == "firm_admin":
+        opts = [{"label": r, "value": r} for r in auth.ROLES if r != "admin"]
+    else:
+        opts = [{"label": r, "value": r} for r in auth.ROLES]
+    return opts, opts
+
+
+@callback(
+    Output("firm-options-firm", "options"),
+    Output("firm-options-firm", "value"),
+    Output("firm-options-firm-wrap", "style"),
+    Output("firm-options-name", "value", allow_duplicate=True),
+    Output("firm-options-new-wrap", "style"),
+    Output("firm-delete-wrap", "style"),
+    Input("firm-options-boot", "data"),
+    prevent_initial_call='initial_duplicate',
+)
+def firm_options_load(_):
+    u = auth.current_user
+    if u.role == "admin":
+        firms = store.list_firms()
+        opts = [{"label": f["name"], "value": f["id"]} for f in firms]
+        val = firms[0]["id"] if firms else 1
+        wrap = {"display": "block", "maxWidth": "640px", "marginBottom": "16px"}
+        new_wrap = {"display": "block"}
+        del_wrap = {"display": "block"}
+    elif u.role == "firm_admin":
+        fid = auth.firm_scope(u)
+        opts = [{"label": store.get_firm(fid)["name"], "value": fid}]
+        val = fid
+        wrap = {"display": "none"}
+        new_wrap = {"display": "none"}
+        del_wrap = {"display": "none"}
+    else:
+        opts, val, wrap, new_wrap, del_wrap = (
+            [], None, {"display": "none"}, {"display": "none"}, {"display": "none"},
+        )
+    return opts, val, wrap, dash.no_update, new_wrap, del_wrap
+
+
+@callback(
+    Output("firm-options-name", "value"),
+    Input("firm-options-firm", "value"),
+    prevent_initial_call='initial_duplicate',
+)
+def firm_options_pick(firm_id):
+    if firm_id is None:
+        return ""
+    firm = store.get_firm(firm_id)
+    return firm["name"] if firm else ""
+
+
+@callback(
+    Output("firm-save-trigger", "data", allow_duplicate=True),
+    Input("firm-options-save", "n_clicks"),
+    prevent_initial_call=True,
+)
+def arm_firm_save(n):
+    return n
+
+
+@callback(
+    Output("firm-options-status", "children"),
+    Output("firm-options-firm", "options", allow_duplicate=True),
+    Output("firm-options-firm", "value", allow_duplicate=True),
+    Input("firm-save-trigger", "data"),
+    State("firm-options-firm", "value"),
+    State("firm-options-name", "value"),
+    prevent_initial_call=True,
+)
+def firm_options_save(trigger, firm_id, name):
+    if not trigger:
+        raise PreventUpdate
+    u = auth.guard("admin", "firm_admin")
+    fid = firm_id if u.role == "admin" and firm_id else auth.firm_scope(u)
+    if fid is None:
+        return dbc.Alert("No firm selected.", color="warning"), dash.no_update, dash.no_update
+    if not name or not name.strip():
+        return dbc.Alert("Firm name cannot be empty.", color="danger"), dash.no_update, dash.no_update
+    try:
+        store.update_firm_settings(fid, name=name.strip())
+    except ValueError as e:
+        return dbc.Alert(str(e), color="danger"), dash.no_update, dash.no_update
+    opts = [{"label": f["name"], "value": f["id"]} for f in store.list_firms()]
+    return dbc.Alert("Firm options saved.", color="success"), opts, fid
+
+
+@callback(
+    Output("firm-options-status", "children", allow_duplicate=True),
+    Output("firm-options-firm", "options", allow_duplicate=True),
+    Output("firm-options-firm", "value", allow_duplicate=True),
+    Output("firm-options-name", "value", allow_duplicate=True),
+    Input("firm-options-new-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def create_firm(n):
+    u = auth.guard("admin")
+    try:
+        new_id = store.create_firm()
+    except ValueError as e:
+        return dbc.Alert(str(e), color="danger"), dash.no_update, dash.no_update, dash.no_update
+    firms = store.list_firms()
+    opts = [{"label": f["name"], "value": f["id"]} for f in firms]
+    firm = store.get_firm(new_id)
+    return dbc.Alert(f"Firm created (ID {new_id}). Rename it in the Firm Name field.", color="success"), opts, new_id, firm["name"]
+
+
+@callback(
+    Output("firm-delete-modal", "is_open"),
+    Output("firm-delete-firm-name", "children"),
+    Input("firm-delete-btn", "n_clicks"),
+    State("firm-options-firm", "value"),
+    prevent_initial_call=True,
+)
+def open_firm_delete(n, firm_id):
     auth.guard("admin")
-    user_map = [{"label": u["username"], "value": u["id"]} for u in store.list_users()]
-    return store.list_users(), f"Managing users as {auth.current_user.username}.", store.list_all_grants(), user_map
+    if not n:
+        raise PreventUpdate
+    firm = store.get_firm(firm_id)
+    return True, firm["name"] if firm else "Unknown firm"
+
+
+@callback(
+    Output("firm-delete-modal", "is_open", allow_duplicate=True),
+    Input("firm-delete-cancel", "n_clicks"),
+    prevent_initial_call=True,
+)
+def close_firm_delete(n):
+    auth.guard("admin")
+    if not n:
+        raise PreventUpdate
+    return False
+
+
+@callback(
+    Output("firm-options-status", "children", allow_duplicate=True),
+    Output("firm-options-firm", "options", allow_duplicate=True),
+    Output("firm-options-firm", "value", allow_duplicate=True),
+    Output("firm-options-name", "value", allow_duplicate=True),
+    Output("firm-delete-modal", "is_open", allow_duplicate=True),
+    Input("firm-delete-confirm", "n_clicks"),
+    State("firm-options-firm", "value"),
+    prevent_initial_call=True,
+)
+def delete_firm_cb(n, firm_id):
+    auth.guard("admin")
+    if not n:
+        raise PreventUpdate
+    if firm_id is None:
+        return (dbc.Alert("No firm selected.", color="warning"),
+                dash.no_update, dash.no_update, dash.no_update, False)
+    if int(auth.current_user.firm_id) == int(firm_id):
+        return (dbc.Alert("You cannot delete the firm you belong to.", color="danger"),
+                dash.no_update, dash.no_update, dash.no_update, False)
+    try:
+        old_name = store.delete_firm(firm_id)
+    except ValueError as e:
+        return (dbc.Alert(str(e), color="danger"),
+                dash.no_update, dash.no_update, dash.no_update, False)
+    firms = store.list_firms()
+    opts = [{"label": f["name"], "value": f["id"]} for f in firms]
+    val = firms[0]["id"] if firms else None
+    nxt_name = store.get_firm(val)["name"] if val else ""
+    return (dbc.Alert(f"Deleted firm '{old_name}'.", color="success"),
+            opts, val, nxt_name, False)
 
 
 @callback(
@@ -1472,11 +1799,12 @@ def admin_load(_):
     State("admin-role-select", "value"),
     State("admin-reset-pw", "value"),
     State("admin-users-grid", "selectedRows"),
+    State("users-firm-select", "value"),
     prevent_initial_call=True
 )
 def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
-                 new_name, new_pw, new_email, new_role, sel_role, reset_pw, selected):
-    auth.guard("admin")
+                 new_name, new_pw, new_email, new_role, sel_role, reset_pw, selected, users_firm):
+    u = auth.guard("admin", "firm_admin")
     trig = dash.callback_context.triggered_id
     uid = uname = None
     if selected:
@@ -1487,13 +1815,18 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
         name = new_name.strip()
         if store.get_user_by_username(name):
             status = f"Username '{name}' already exists."
+        elif u.role == "firm_admin" and (new_role or "user") == "admin":
+            status = "Firm admins cannot create admin users."
         else:
-            store.create_user(name, generate_password_hash(new_pw), new_role or "user", (new_email or "").strip() or None)
+            fid = int(users_firm) if u.role == "admin" and users_firm else auth.firm_scope(u)
+            store.create_user(name, generate_password_hash(new_pw), new_role or "user", (new_email or "").strip() or None, firm_id=fid)
             status = f"Created user '{name}' ({new_role or 'user'})."
     elif trig == "admin-create-btn":
         status = "Enter a username and password to create a user."
     elif trig == "admin-set-role-btn":
-        if uid is not None and sel_role:
+        if u.role == "firm_admin" and sel_role == "admin":
+            status = "Firm admins cannot assign the admin role."
+        elif uid is not None and sel_role:
             store.set_user_role(uid, sel_role)
             status = f"Role set to '{sel_role}' for '{uname}'."
         else:
@@ -1522,7 +1855,8 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_delete,
         else:
             status = "Select a user."
 
-    return store.list_users(), status
+    ret_fid = int(users_firm) if u.role == "admin" and users_firm else auth.firm_scope(u)
+    return store.list_users(firm_id=ret_fid), status
 
 
 @callback(
@@ -1587,7 +1921,7 @@ def build_cm_details(main_id, create_mode):
     Input("manage-boot", "data"),
 )
 def maincase_create_gate(_):
-    if auth.current_user.role in ("admin", "case_manager"):
+    if auth.current_user.role in ("admin", "firm_admin", "case_manager"):
         return dash.no_update
     return {"display": "none"}
 
@@ -1598,27 +1932,11 @@ def maincase_create_gate(_):
     prevent_initial_call='initial_duplicate',
 )
 def cm_boot_create_mode(_):
-    if auth.current_user.role not in ("admin", "case_manager"):
+    if auth.current_user.role not in ("admin", "firm_admin", "case_manager"):
         return dash.no_update
-    if store.list_main_options():
+    if store.list_main_options(firm_id=auth.firm_scope(auth.current_user)):
         return dash.no_update
     return True
-
-
-@callback(
-    Output("sc-main", "options"),
-    Input("manage-boot", "data"),
-)
-def sc_main_options_boot(_):
-    return store.list_main_options()
-
-
-@callback(
-    Output("grant-main", "options"),
-    Input("manage-boot", "data"),
-)
-def grant_main_options_boot(_):
-    return store.list_main_options()
 
 
 _SC_SUBCASE_FIELD_DEFS = [
@@ -1803,20 +2121,24 @@ def _cm_error_alert(message):
     State("cm-jurisdiction", "value"),
     State("cm-judge", "value"),
     State("cm-petition-date", "value"),
+    State("cm-firm-select", "value"),
     prevent_initial_call=True
 )
-def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge, petition):
+def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge, petition, cm_firm):
     if create_mode:
-        user = auth.guard("admin", "case_manager")
+        user = auth.guard("admin", "firm_admin", "case_manager")
         try:
-            new_id = store.create_main_case(name, number, jurisdiction, judge, petition)
+            fid = int(cm_firm) if user.role == "admin" and cm_firm else auth.firm_scope(user)
+            new_id = store.create_main_case(name, number, jurisdiction, judge, petition, firm_id=fid)
         except ValueError as e:
             status = _cm_error_alert(str(e))
             return status, dash.no_update, dash.no_update, dash.no_update
         if user.role == "case_manager":
             store.grant_main(user.id, new_id)
         status = dbc.Alert(f"Created main case. (ID {new_id})", color="success")
-        return status, new_id, store.list_main_options(), False
+        scope_opts = store.list_main_options(
+            firm_id=(int(cm_firm) if user.role == "admin" and cm_firm else auth.firm_scope(user)))
+        return status, new_id, scope_opts, False
     if main_id is None:
         return dbc.Alert("Select a main case first.", color="warning"), \
             dash.no_update, dash.no_update, dash.no_update
@@ -1828,15 +2150,6 @@ def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge,
         return status, dash.no_update, dash.no_update, dash.no_update
     return dbc.Alert("Saved.", color="success"), \
         dash.no_update, dash.no_update, dash.no_update
-
-
-@callback(
-    Output("cm-main", "options", allow_duplicate=True),
-    Input("manage-boot", "data"),
-    prevent_initial_call='initial_duplicate',
-)
-def cm_options_boot(_):
-    return store.list_main_options()
 
 
 @callback(
@@ -1860,10 +2173,11 @@ def grant_subcase_options(main_id):
     State("grant-user", "value"),
     State("grant-main", "value"),
     State("grant-subcase", "value"),
+    State("users-firm-select", "value"),
     prevent_initial_call=True
 )
-def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id):
-    auth.guard("admin")
+def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id, users_firm):
+    u = auth.guard("admin", "firm_admin")
     trig = dash.callback_context.triggered_id
     if trig == "grant-main-btn" and user_id is not None and main_id is not None:
         store.grant_main(user_id, main_id)
@@ -1879,7 +2193,9 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id):
         status = "Revoked subcase access."
     else:
         status = "Select a user and a target before clicking an action."
-    return store.list_all_grants(), status
+    scope_fid = int(users_firm) if u.role == "admin" and users_firm else auth.firm_scope(u)
+    scope_users = [x["id"] for x in store.list_users(firm_id=scope_fid)]
+    return store.list_all_grants(user_ids=scope_users), status
 
 
 @callback(
@@ -1907,6 +2223,7 @@ def session_boot(_):
     info = st.meta
     if info is None:
         return (dash.no_update,) * 16
+    scope = auth.firm_scope(auth.current_user)
     main_info = [
         html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
         html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
@@ -1914,7 +2231,7 @@ def session_boot(_):
     return (
         main_info,
         info['main_id'],
-        store.list_subcase_options(info['main_id']),
+        store.list_subcase_options(info['main_id'], firm_id=scope),
         info['subcase_id'],
         st.df_historical.to_dict('records'),
         st.df_preference.to_dict('records'),
@@ -1937,7 +2254,7 @@ def session_boot(_):
     Input("auth-boot", "data"),
 )
 def welcome_modal(_):
-    return not store.list_main_options()
+    return not store.list_main_options(firm_id=auth.firm_scope(auth.current_user))
 
 
 @callback(
@@ -1945,7 +2262,7 @@ def welcome_modal(_):
     Input("auth-boot", "data"),
 )
 def analysis_main_options_boot(_):
-    return store.list_main_options()
+    return store.list_main_options(firm_id=auth.firm_scope(auth.current_user))
 
 
 # Apply login protection to every route (including Dash callbacks)

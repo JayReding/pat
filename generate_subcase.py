@@ -103,11 +103,12 @@ def main():
     cur = conn.cursor()
 
     main = cur.execute(
-        'SELECT id, case_name, petition_date FROM main_cases WHERE id = ?',
+        'SELECT id, case_name, petition_date, firm_id FROM main_cases WHERE id = ?',
         (MAIN_CASE_ID,)).fetchone()
     if main is None:
         raise SystemExit(f'Main case {MAIN_CASE_ID} not found')
     petition_date = main[2]
+    firm_id = main[3]
 
     cur.execute(
         'SELECT id FROM subcases WHERE main_case_id = ? AND transferee_name = ?',
@@ -122,9 +123,9 @@ def main():
         print(f'Removed existing {NAME} (subcase id {existing[0]})')
 
     cur.execute(
-        'INSERT INTO subcases (main_case_id, transferee_name, adversary_number, created_at, meta) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (MAIN_CASE_ID, NAME, ADVERSARY_NUMBER, datetime.now(timezone.utc).isoformat(), '{}'))
+        'INSERT INTO subcases (main_case_id, transferee_name, adversary_number, created_at, meta, firm_id) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (MAIN_CASE_ID, NAME, ADVERSARY_NUMBER, datetime.now(timezone.utc).isoformat(), '{}', firm_id))
     new_subcase_id = cur.lastrowid
 
     source_rows = cur.execute(
@@ -136,6 +137,7 @@ def main():
                  f"VALUES ({', '.join('?' for _ in cols[1:])})"
     for r in rows:
         r['subcase_id'] = new_subcase_id
+        r['firm_id'] = firm_id
         cur.execute(insert_sql, tuple(r[c] for c in cols[1:]))
     conn.commit()
 

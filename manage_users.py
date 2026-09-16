@@ -7,7 +7,7 @@ from werkzeug.security import generate_password_hash
 
 import store
 
-ROLES = ('admin', 'case_manager', 'user')
+ROLES = ('admin', 'firm_admin', 'case_manager', 'user')
 
 
 def cmd_create(args):
@@ -22,21 +22,22 @@ def cmd_create(args):
         if password != confirm:
             print("Passwords do not match.")
             sys.exit(1)
-    store.create_user(username, generate_password_hash(password), args.role, args.email or None)
-    print(f"Created user '{username}' with role '{args.role}'.")
+    store.create_user(username, generate_password_hash(password), args.role, args.email or None,
+                      firm_id=args.firm)
+    print(f"Created user '{username}' with role '{args.role}' (firm {args.firm}).")
 
 
 def cmd_list(args):
-    users = store.list_users()
+    users = store.list_users(firm_id=args.firm if args.firm else None)
     if not users:
         print("No users.")
         return
-    fmt = "{:<5} {:<20} {:<15} {:<30} {:<8} {}"
-    print(fmt.format("ID", "Username", "Role", "Email", "Active", "Created At"))
-    print("-" * 100)
+    fmt = "{:<5} {:<20} {:<15} {:<8} {:<30} {:<8} {}"
+    print(fmt.format("ID", "Username", "Role", "Firm", "Email", "Active", "Created At"))
+    print("-" * 110)
     for u in users:
         print(fmt.format(
-            u['id'], u['username'], u['role'],
+            u['id'], u['username'], u['role'], u['firm_id'],
             u.get('email') or '', 'yes' if u['active'] else 'no', u['created_at']
         ))
 
@@ -153,9 +154,11 @@ def main():
     p_create.add_argument('--role', choices=ROLES, default='user')
     p_create.add_argument('--email')
     p_create.add_argument('--password')
+    p_create.add_argument('--firm', type=int, default=1)
     p_create.set_defaults(func=cmd_create)
 
     p_list = subs.add_parser('list-users', help='List all users')
+    p_list.add_argument('--firm', type=int, default=0, help='Filter by firm (0 = all, default)')
     p_list.set_defaults(func=cmd_list)
 
     p_role = subs.add_parser('set-role', help='Change a user role')
