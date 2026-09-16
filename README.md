@@ -14,11 +14,14 @@ PAT is in early development and should not be used for real-world use at this po
 - Saves state of each case so that OCB ranges and other settings are preserved.
 - Allows for analyzing the ordinary course by DSO (days an invoice is outstanding from the invoice date) or DPD (days an invoice is past due).
 - Basic user management and administration.
+- Basic firm management and administration
 - Can export charts in PDF or Excel for use as exhibits.
 
 **Future Features**
-- Data entry tools
-- More robust multi-user support
+- Data entry tools.
+- Data backup and restore.
+- Guest access to particular subfiles.
+- More robust multi-user support.
 - Integrations with other software.
 
 **Installation and Running**

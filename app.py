@@ -428,6 +428,7 @@ dcc.Tab(label='Historical Period', children=[
                     html.Div(id="ocb-range-status", className="mb-3"),
                     html.Div(id="ocb-hist-coverage", className="mb-3"),
                     html.Div(id="ocb-range-warning", className="mb-3"),
+                    html.H6('Display Options'),
                     html.Div(className="mb-3", children=[
                         html.Label('Binning Metric', htmlFor="ocb-metric"),
                         dcc.Dropdown(id="ocb-metric", options=[
@@ -450,6 +451,12 @@ dcc.Tab(label='Historical Period', children=[
                     dbc.Button("+/- 15 Days", id="ocb-plus15", color="secondary", className="mt-2 w-100"),
                     dbc.Button("Total Range", id="ocb-total-range", color="secondary", className="mt-2 w-100"),
                     dbc.Button("Clear OCB Range", id="ocb-clear", color="primary", className="mt-2 w-100"),
+                    html.Div(style={"display": "flex", "gap": "10px", "marginTop": "12px"}, children=[
+                        dbc.Button("Export Excel", id="export-ocb-excel-btn", color="primary", size="sm"),
+                        dbc.Button("Export PDF", id="export-ocb-pdf-btn", color="primary", size="sm"),
+                        dcc.Download(id="download-ocb-pdf"),
+                        dcc.Download(id="download-ocb-excel"),
+                    ]),
                     html.Div(id="autosave-status", className="mt-3 text-muted small"),
                 ], width=3),
                 dbc.Col([
@@ -1168,7 +1175,9 @@ def apply_ocb_range(sel, metric, start, end, step):
         mask &= days <= upper
     st.df_preference["Ordinary"] = 0
     st.df_preference.loc[mask, "Ordinary"] = 1
-    status = f"OCB range: {s_label} to {e_label} — {int(mask.sum())} preference invoice(s) marked as Ordinary."
+    lo = lower if lower is not None else start
+    hi = upper if upper is not None else end
+    status = f"OCB range: {lo} to {hi} days — {int(mask.sum())} preference invoice(s) marked as Ordinary."
     hist_days = st.df_historical[metric]
     hist_mask = pd.Series(True, index=st.df_historical.index)
     if lower is not None:
@@ -1424,6 +1433,84 @@ def export_pref_excel(n_clicks):
     safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Preference_Period_Invoices'
     excel_bytes = export_excel.build_invoices_workbook(st.df_preference, sheet_title="Preference Period Invoices")
     return dcc.send_bytes(lambda buf: buf.write(excel_bytes), f"{safe_name}_Preference_Period_Invoices.xlsx")
+
+
+def _ocb_summary_and_rows(st, sel, start, end, step):
+    summary = {"range_label": "—", "invoice_count": "—", "invoice_amount": None}
+    if sel is None or sel.get("end") is None:
+        return None, summary
+    a, b = sorted((int(sel["start"]), int(sel["end"])))
+    start = int(start) if start is not None else 0
+    end = int(end) if end is not None else 100
+    step = int(step) if step is not None else 5
+    metric = st.ocb_metric or "Invoice to Payment"
+    df_cur = analysis.build_ocb_data(st.df_preference, st.df_historical, start, end, step, metric)
+    lower, _ = analysis.ocb_label_bounds(df_cur["date_range"].iloc[a], start, end)
+    _, upper = analysis.ocb_label_bounds(df_cur["date_range"].iloc[b], start, end)
+    lo = lower if lower is not None else start
+    hi = upper if upper is not None else end
+    days = st.df_preference[metric]
+    mask = pd.Series(True, index=st.df_preference.index)
+    if lower is not None:
+        mask &= days >= lower
+    if upper is not None:
+        mask &= days <= upper
+    summary = {
+        "range_label": f"{lo} to {hi} days",
+        "invoice_count": int(mask.sum()),
+        "invoice_amount": float(st.df_preference.loc[mask, "Invoice Amount"].sum()),
+    }
+    return (a, b), summary
+
+
+@callback(
+    Output("download-ocb-pdf", "data"),
+    Input("export-ocb-pdf-btn", "n_clicks"),
+    State("ocb_grid", "rowData"),
+    State("ocb-range", "data"),
+    State("ocb-start", "value"),
+    State("ocb-end", "value"),
+    State("ocb-step", "value"),
+    prevent_initial_call=True
+)
+def export_ocb_pdf(n_clicks, row_data, ocb_range, start, end, step):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.meta is None:
+        raise PreventUpdate
+    df = pd.DataFrame(row_data or [])
+    if df.empty:
+        raise PreventUpdate
+    transferee = (st.meta.get('transferee') or '').strip()
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Ordinary_Course'
+    rows, summary = _ocb_summary_and_rows(st, ocb_range, start, end, step)
+    pdf_bytes = export_pdf.build_ocb_pdf(st.meta, df, selected_rows=rows, summary=summary)
+    return dcc.send_bytes(lambda buf: buf.write(pdf_bytes), f"{safe_name}_Ordinary_Course.pdf")
+
+
+@callback(
+    Output("download-ocb-excel", "data"),
+    Input("export-ocb-excel-btn", "n_clicks"),
+    State("ocb_grid", "rowData"),
+    State("ocb-range", "data"),
+    State("ocb-start", "value"),
+    State("ocb-end", "value"),
+    State("ocb-step", "value"),
+    prevent_initial_call=True
+)
+def export_ocb_excel(n_clicks, row_data, ocb_range, start, end, step):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.meta is None:
+        raise PreventUpdate
+    df = pd.DataFrame(row_data or [])
+    if df.empty:
+        raise PreventUpdate
+    transferee = (st.meta.get('transferee') or '').strip()
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Ordinary_Course'
+    rows, summary = _ocb_summary_and_rows(st, ocb_range, start, end, step)
+    excel_bytes = export_excel.build_ocb_workbook(df, selected_rows=rows, summary=summary)
+    return dcc.send_bytes(lambda buf: buf.write(excel_bytes), f"{safe_name}_Ordinary_Course.xlsx")
 
 
 @callback(
