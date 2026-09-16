@@ -32,6 +32,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
+The admin password is randomly generated on startup and will appear in the console on first start. Please note that the password will only be shown once.
+
 Then open http://127.0.0.1:8050 in a browser.
 
 *Notes:*
