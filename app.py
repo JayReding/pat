@@ -20,6 +20,7 @@ import export_pdf
 import store
 import auth
 import session
+import mailer as smtp_mail
 
 # Incorporate data
 store.init_cases_db()
@@ -606,7 +607,8 @@ def _manage_sidebar(active):
             dbc.NavLink("Main Case Management", href="/manage", active=(active == "main"), className="mb-2"),
             dbc.NavLink("Subcase Management", href="/manage/subcases", active=(active == "subcase"), className="mb-2"),
             html.Div("Administration", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
-            dbc.NavLink("User Management", id="admin-nav-btn", href="/manage/users", active=(active == "users")),
+            dbc.NavLink("User Management", id="admin-nav-btn", href="/manage/users", active=(active == "users"), className="mb-2"),
+            dbc.NavLink("Email Settings", id="email-settings-nav-btn", href="/manage/email-settings", active=(active == "email-settings")),
         ], pills=True, vertical=True),
     ])
 
@@ -813,6 +815,53 @@ def _account_page():
     ])
 
 
+def _email_settings_page():
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
+        _manage_header(),
+        dcc.Store(id="manage-boot", data=True),
+        dcc.Store(id="email-boot", data=True),
+        html.Hr(),
+        dbc.Row([
+            _manage_sidebar("email-settings"),
+            dbc.Col(width=10, children=[
+                html.H3(children='Email Settings'),
+                html.P('Configure the SMTP server the application uses to send notification emails. '
+                       'These settings are system-wide.', className="text-muted"),
+                _cm_field('SMTP server (FQDN or IP)', "email-smtp-host"),
+                html.Div(className="mb-2", style={"maxWidth": "320px"}, children=[
+                    html.Label('Server port', htmlFor="email-smtp-port", style={"fontWeight": "600"}),
+                    dbc.Input(id="email-smtp-port", type="number", min=1, max=65535,
+                              className="form-control", placeholder="587",
+                              style={"height": "50px", "fontSize": "1rem"}),
+                ]),
+                _cm_field('Username', "email-smtp-username"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label('Password', htmlFor="email-smtp-password", style={"fontWeight": "600"}),
+                    dbc.Input(id="email-smtp-password", type="password",
+                              className="form-control", placeholder="Leave blank to keep current",
+                              style={"height": "50px", "fontSize": "1rem"}),
+                ]),
+                _cm_field('From address', "email-smtp-from", "email"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    dbc.Switch(id="email-smtp-use-auth",
+                               label="Use SMTP AUTH",
+                               value=True,
+                               className="form-switch",
+                               style={"marginBottom": "8px"}),
+                    html.Small("Disable for relays or test servers that do not require authentication.",
+                               className="text-muted d-block"),
+                ]),
+                html.Div(style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                                 "marginTop": "16px"}, children=[
+                    dbc.Button("Save Settings", id="email-save-btn", n_clicks=0, color="primary"),
+                    dbc.Button("Send test email", id="email-test-btn", n_clicks=0, color="secondary"),
+                ]),
+                html.Div(id="email-status", className="mt-3"),
+            ]),
+        ]),
+    ])
+
+
 def _firm_options_page():
     return html.Div(className="manage-console", style={"padding": "20px"}, children=[
         _manage_header(),
@@ -903,6 +952,7 @@ dash.register_page("firm-options", path="/manage/firm-options", layout=_firm_opt
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
 dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
+dash.register_page("email-settings", path="/manage/email-settings", layout=_email_settings_page(), title="Email Settings", name="Email Settings")
 
 app.layout = _shell()
 
@@ -1595,12 +1645,18 @@ def update_user_badge(_boot, _saved):
 @callback(
     Output("admin-nav-btn", "style"),
     Output("firm-options-nav-btn", "style"),
+    Output("email-settings-nav-btn", "style"),
     Input("manage-boot", "data"),
 )
 def manage_admin_gate(_):
-    if auth.current_user.role in ("admin", "firm_admin"):
-        return dash.no_update, dash.no_update
-    return {"display": "none"}, {"display": "none"}
+    u = auth.current_user
+    email_style = (
+        dash.no_update if u.role == "admin"
+        else {"display": "none"}
+    )
+    if u.role in ("admin", "firm_admin"):
+        return dash.no_update, dash.no_update, email_style
+    return {"display": "none"}, {"display": "none"}, email_style
 
 
 def _avatar_swatches(selected_color):
@@ -1677,6 +1733,90 @@ def account_save(trigger, name, email, avatar_color):
 )
 def _arm_account_save(n):
     return n or 0
+
+
+@callback(
+    Output("email-smtp-host", "value"),
+    Output("email-smtp-port", "value"),
+    Output("email-smtp-username", "value"),
+    Output("email-smtp-from", "value"),
+    Output("email-smtp-use-auth", "value"),
+    Input("email-boot", "data"),
+)
+def email_load(_):
+    auth.guard("admin")
+    s = store.get_email_settings()
+    return (
+        s["smtp_host"],
+        s["smtp_port"],
+        s["smtp_username"],
+        s["smtp_from"],
+        s["smtp_use_auth"],
+    )
+
+
+@callback(
+    Output("email-status", "children"),
+    Input("email-save-btn", "n_clicks"),
+    State("email-smtp-host", "value"),
+    State("email-smtp-port", "value"),
+    State("email-smtp-username", "value"),
+    State("email-smtp-password", "value"),
+    State("email-smtp-from", "value"),
+    State("email-smtp-use-auth", "value"),
+    prevent_initial_call=True,
+)
+def email_save(n, host, port, username, password, frm, use_auth):
+    if not n:
+        raise PreventUpdate
+    auth.guard("admin")
+    try:
+        store.save_email_settings(host, port, username, password, frm, smtp_use_auth=use_auth)
+    except ValueError as e:
+        return dbc.Alert(str(e), color="danger")
+    return dbc.Alert("Email settings saved.", color="success")
+
+
+@callback(
+    Output("email-status", "children", allow_duplicate=True),
+    Input("email-test-btn", "n_clicks"),
+    State("email-smtp-host", "value"),
+    State("email-smtp-port", "value"),
+    State("email-smtp-username", "value"),
+    State("email-smtp-password", "value"),
+    State("email-smtp-from", "value"),
+    State("email-smtp-use-auth", "value"),
+    prevent_initial_call=True,
+)
+def email_test(n, host, port, username, password, frm, use_auth):
+    auth.guard("admin")
+    host = (host or "").strip()
+    if not host:
+        return dbc.Alert("Enter an SMTP server before testing.", color="warning")
+    if port is None or str(port).strip() == "":
+        return dbc.Alert("Enter an SMTP port before testing.", color="warning")
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return dbc.Alert("SMTP port must be a whole number.", color="warning")
+    sender = (frm or "").strip()
+    recipient = (auth.current_user.email or "").strip()
+    if not sender:
+        return dbc.Alert("Enter a 'From address' before sending a test email.", color="warning")
+    if not recipient:
+        return dbc.Alert("Your account has no email address; set one on the Account page first.", color="warning")
+    try:
+        smtp_mail.send_email(
+            host, port, username, password,
+            sender=sender, to=recipient,
+            subject="PAT application email test",
+            body=("This is a test email from the PAT application. "
+                  f"Sent to {recipient} via {host}:{port}."),
+            use_auth=bool(use_auth),
+        )
+    except Exception as e:
+        return dbc.Alert(f"Test email failed: {e}", color="danger")
+    return dbc.Alert(f"Test email sent to {recipient}.", color="success")
 
 
 @callback(

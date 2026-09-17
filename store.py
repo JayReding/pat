@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import json
 import uuid
@@ -248,6 +249,19 @@ def init_state_db():
         )''')
     cur.execute("INSERT OR IGNORE INTO app_state (firm_id, active_subcase_id) VALUES (1, 1)")
     cur.execute("DROP TABLE IF EXISTS cases")
+    cur.execute('''CREATE TABLE IF NOT EXISTS global_settings (
+        id            INTEGER PRIMARY KEY CHECK (id = 1),
+        smtp_host     TEXT,
+        smtp_port     INTEGER,
+        smtp_username TEXT,
+        smtp_password TEXT,
+        smtp_from     TEXT,
+        smtp_use_auth INTEGER NOT NULL DEFAULT 1,
+        updated_at    TEXT
+    )''')
+    gcols = {row[1] for row in cur.execute("PRAGMA table_info(global_settings)").fetchall()}
+    if 'smtp_use_auth' not in gcols:
+        cur.execute("ALTER TABLE global_settings ADD COLUMN smtp_use_auth INTEGER NOT NULL DEFAULT 1")
     conn.commit()
     return conn
 
@@ -282,6 +296,68 @@ def save_app_state(subcase_id, firm_id=1):
         "INSERT INTO app_state (firm_id, active_subcase_id) VALUES (?, ?) "
         "ON CONFLICT(firm_id) DO UPDATE SET active_subcase_id = excluded.active_subcase_id",
         (int(firm_id or 1), int(subcase_id)))
+    conn.commit()
+    conn.close()
+
+
+_EMAIL_FIELDS = ("smtp_host", "smtp_port", "smtp_username", "smtp_password", "smtp_from", "smtp_use_auth")
+
+
+def get_email_settings():
+    conn = _connect_state()
+    row = conn.execute(
+        "SELECT smtp_host, smtp_port, smtp_username, smtp_password, smtp_from, smtp_use_auth "
+        "FROM global_settings WHERE id = 1"
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return {"smtp_host": "", "smtp_port": None, "smtp_username": "",
+                "smtp_password": "", "smtp_from": "", "smtp_use_auth": True}
+    data = dict(zip(_EMAIL_FIELDS, row))
+    data["smtp_host"] = data.get("smtp_host") or ""
+    data["smtp_username"] = data.get("smtp_username") or ""
+    data["smtp_password"] = data.get("smtp_password") or ""
+    data["smtp_from"] = data.get("smtp_from") or ""
+    use_auth = data.get("smtp_use_auth")
+    data["smtp_use_auth"] = True if use_auth is None else bool(use_auth)
+    return data
+
+
+def _validated_email_settings(smtp_host, smtp_port, smtp_username, smtp_from, existing_password, password):
+    host = (smtp_host or "").strip()
+    if not host:
+        raise ValueError("SMTP server (FQDN or IP) is required.")
+    try:
+        port = int(smtp_port)
+    except (TypeError, ValueError):
+        raise ValueError("SMTP port must be a whole number.")
+    if not (1 <= port <= 65535):
+        raise ValueError("SMTP port must be between 1 and 65535.")
+    user = (smtp_username or "").strip()
+    frm = (smtp_from or "").strip()
+    if frm and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", frm):
+        raise ValueError("From address does not look like a valid email address.")
+    stored_password = password if (password or "").strip() else (existing_password or "")
+    return host, port, user, stored_password, frm
+
+
+def save_email_settings(smtp_host, smtp_port, smtp_username, smtp_password, smtp_from, smtp_use_auth=None):
+    existing = get_email_settings()
+    host, port, user, password, frm = _validated_email_settings(
+        smtp_host, smtp_port, smtp_username, smtp_from,
+        existing["smtp_password"], smtp_password)
+    use_auth = existing["smtp_use_auth"] if smtp_use_auth is None else bool(smtp_use_auth)
+    conn = _connect_state()
+    conn.execute(
+        """INSERT INTO global_settings (id, smtp_host, smtp_port, smtp_username, smtp_password, smtp_from, smtp_use_auth, updated_at)
+           VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+               smtp_host=excluded.smtp_host, smtp_port=excluded.smtp_port,
+               smtp_username=excluded.smtp_username, smtp_password=excluded.smtp_password,
+               smtp_from=excluded.smtp_from, smtp_use_auth=excluded.smtp_use_auth,
+               updated_at=excluded.updated_at""",
+        (host, port, user, password, frm, 1 if use_auth else 0, datetime.now(timezone.utc).isoformat()),
+    )
     conn.commit()
     conn.close()
 
