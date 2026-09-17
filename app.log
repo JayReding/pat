@@ -60,3 +60,36 @@ Dash is running on http://127.0.0.1:8050/
 127.0.0.1 - - [17/Sep/2026 15:12:12] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
 127.0.0.1 - - [17/Sep/2026 15:12:16] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
 127.0.0.1 - - [17/Sep/2026 15:12:17] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "[36mGET /_dash-component-suites/dash_ag_grid/async-community.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+/home/wombat/Code/pat/app.py:186: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  st.df_snv = analysis.calculate_new_value(pd.concat([st.df_transfers, st.df_newvalue], ignore_index=True))
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+/home/wombat/Code/pat/app.py:186: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  st.df_snv = analysis.calculate_new_value(pd.concat([st.df_transfers, st.df_newvalue], ignore_index=True))
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+/home/wombat/Code/pat/app.py:186: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  st.df_snv = analysis.calculate_new_value(pd.concat([st.df_transfers, st.df_newvalue], ignore_index=True))
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:56] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Sep/2026 15:19:57] "POST /_dash-update-component?endId=Gnn1kHCFMp7h6Rp4UQ1Ebff5~939d71418ed4be2993be7a1da076de045a7306428df71c0f91d4c7f8c39e1b52 HTTP/1.1" 200 -

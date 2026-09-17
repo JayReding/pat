@@ -2,3 +2,4 @@ pat_state.db
 pat_cases.db
 pat_users.db
 __pycache__/
+app.log
