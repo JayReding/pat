@@ -199,6 +199,9 @@ def load_case(st, subcase_id, firm_id=None):
 
     hist_dates = pd.to_datetime(st.df_historical['Payment Date'])
     pref_dates = pd.to_datetime(st.df_preference['Payment Date'])
+    hist_title = f'Historical Period: {hist_dates.min().strftime("%m/%d/%Y")} through {hist_dates.max().strftime("%m/%d/%Y")}' if not st.df_historical.empty else 'Historical Period: No data'
+    pref_title = f'Preference Period: {s} through {p}'
+
     info = {
         'subcase_id': int(subcase_id),
         'main_id': main['main_id'],
@@ -214,8 +217,8 @@ def load_case(st, subcase_id, firm_id=None):
         'filing_date': main['filing_date'] or '',
         'subcase_display': (main['adversary_number'] or '') if main['filing_date'] else (main['file_number'] or ''),
         'subcase_id_label': 'Adversary Number' if main['filing_date'] else 'File Number',
-        'hist_title': f'Historical Period: {hist_dates.min().strftime("%m/%d/%Y")} through {hist_dates.max().strftime("%m/%d/%Y")}',
-        'pref_title': f'Preference Period: {s} through {p}',
+        'hist_title': hist_title,
+        'pref_title': pref_title,
         'hist_count': f'Historical Period Invoice Count: {len(hist_dates)}',
         'pref_count': f'Preference Period Invoice Count: {len(pref_dates)}',
         'ocb_range': ocb_range,
@@ -304,6 +307,8 @@ html.Div(children=[
     html.Div(children=[
             dcc.Tabs([
          dcc.Tab(id="summary", label='Case Summary', children=[
+            html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "alignItems": "flex-start"}, children=[
+            html.Div(style={"flex": "1 1 0", "minWidth": "0"}, children=[
             html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "marginBottom": "20px"}, children=[
                 _callout("cs-net-pref-figure", "Net Preference", "fa-solid fa-dollar-sign fa-3x"),
                 _callout("cs-total-transfers", "Total Transfers", "fa-solid fa-money-bill-transfer fa-3x", color_var="var(--bs-info)"),
@@ -316,14 +321,29 @@ html.Div(children=[
                 _callout("cs-dpd-diff-figure", "Change in Days Past Due", "fa-solid fa-arrow-trend-up fa-3x",
                          background="var(--bs-body-bg)", border="1px solid #000", text_color="#000", icon_id="cs-dpd-diff-icon"),
             ]),
-            dbc.ListGroup([
-                dbc.ListGroupItem([html.Strong('Total Transfers: '), html.Span(id="summary-total-transfers")]),
-                dbc.ListGroupItem([html.Strong('Total New Value: '), html.Span(id="summary-total-new-value")]),
-                dbc.ListGroupItem([html.Strong('Net of New Value: '), html.Span(id="summary-net-new-value")]),
-                dbc.ListGroupItem([html.Strong('Net Preference (Defenses Applied): '), html.Span(id="summary-net-pref-defenses")]),
-                dbc.ListGroupItem([html.Strong('Historical Weighted Average DSO: '), html.Span(id="summary-hist-wavg")]),
-                dbc.ListGroupItem([html.Strong('Preference Period Weighted DSO: '), html.Span(id="summary-pref-wavg")]),
-                dbc.ListGroupItem([html.Strong('Weighted DSO Difference: '), html.Span(id="summary-dso-diff")]),
+            html.H3("Transfers in the Preference Period",
+                    style={"margin": "24px 0 8px", "fontSize": "1.1rem", "fontWeight": "600"}),
+            dag.AgGrid(
+                id="transfers-pref",
+                rowData=[],
+                getRowStyle=analysis.ocb_default_style(),
+                style={"flex": "1 1 0", "minWidth": "0",
+                       "height": "max(300px, calc(100vh - 450px))"},
+                columnDefs=[
+                    {"field": "Transfer Number"},
+                    {"field": "Transfer Amount",
+                     "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
+                    {"field": "Payment Date"},
+                    {"field": "Check Date"},
+                ],
+            ),
+            ]),
+            html.Div(style={"flex": "1 1 0", "minWidth": "0"}, children=[
+                html.Div(id="contact-panel", children=[
+                    html.Div("Select a subcase to view contact details.",
+                             style={"color": "var(--bs-secondary-color)"}),
+                ]),
+            ]),
             ]),
         ]),
 dcc.Tab(label='Historical Period', children=[
@@ -702,8 +722,11 @@ def _subcase_page():
                 html.H3(children='Subcase Management'),
                 _firm_picker("sc"),
                 dcc.Dropdown(id="sc-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                dbc.Button("New Subcase", id="sc-new-subcase-btn", n_clicks=0, color="success",
+                           style={"display": "none", "marginBottom": "8px"}),
                 html.H5('Subcase Details', className="mt-3"),
                 dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                _cm_field('Transferee Name', "sc-transferee-name"),
                 _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
                 _cm_field('Filing Date (YYYY-MM-DD)', "sc-filing-date", "date"),
                 html.H6('Contact', className="mt-3"),
@@ -751,8 +774,31 @@ def _subcase_page():
                         ]),
                     ]),
                 ]),
-                dbc.Button("Save Subcase", id="sc-save-subcase", n_clicks=0, color="primary", className="mt-2"),
+                html.Div(className="d-flex gap-2 mt-3", children=[
+                    dbc.Button("Save Subcase", id="sc-save-subcase", n_clicks=0, color="primary"),
+                    dbc.Button("Delete Subcase", id="sc-delete-subcase", n_clicks=0, color="danger",
+                               style={"display": "none", "marginLeft": "auto"}),
+                ]),
                 html.Div(id="sc-subcase-status", className="mt-3"),
+                dbc.Modal(
+                    id="sc-delete-modal",
+                    is_open=False,
+                    centered=True,
+                    children=[
+                        dbc.ModalHeader(dbc.ModalTitle("Delete subcase?")),
+                        dbc.ModalBody([
+                            html.P('You are about to permanently delete subcase'),
+                            html.Blockquote(html.Span(id="sc-delete-target", style={"fontWeight": "600"})),
+                            html.P('This removes all invoice records, case settings, and user '
+                                   'grants for this subcase. This action cannot be undone.',
+                                   className="text-muted"),
+                        ]),
+                        dbc.ModalFooter([
+                            dbc.Button("Cancel Deletion", id="sc-delete-cancel", className="ms-auto", color="secondary"),
+                            dbc.Button("Delete Subcase", id="sc-delete-confirm", color="danger"),
+                        ]),
+                    ],
+                ),
             ]),
         ]),
     ])
@@ -1025,13 +1071,6 @@ def _ocb_transfer_shares(st):
 
 
 @callback(
-    Output("summary-total-transfers", "children"),
-    Output("summary-total-new-value", "children"),
-    Output("summary-net-new-value", "children"),
-    Output("summary-net-pref-defenses", "children"),
-    Output("summary-hist-wavg", "children"),
-    Output("summary-pref-wavg", "children"),
-    Output("summary-dso-diff", "children"),
     Output("ocb-net-pref-defenses", "children"),
     Output("cs-net-pref-figure", "children"),
     Output("cs-total-transfers", "children"),
@@ -1055,10 +1094,10 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     total_transfers = st.df_transfers["Transfer Amount"].sum()
     hist_wavg = analysis.calc_weighted_dso(st.df_historical)
     pref_wavg = analysis.calc_weighted_dso(st.df_preference)
-    diff = (pref_wavg - hist_wavg) / hist_wavg * 100
+    diff = (pref_wavg - hist_wavg) / hist_wavg * 100 if hist_wavg else 0.0
     hist_dpd = analysis.calc_weighted_dpd(st.df_historical)
     pref_dpd = analysis.calc_weighted_dpd(st.df_preference)
-    dpd_diff = (pref_dpd - hist_dpd) / hist_dpd * 100
+    dpd_diff = (pref_dpd - hist_dpd) / hist_dpd * 100 if hist_dpd else 0.0
 
     tot_shares, ord_shares = _ocb_transfer_shares(st)
     net_pref_defenses, total_new_value = analysis.calc_net_pref_defenses(df_nv, tot_shares, ord_shares)
@@ -1068,14 +1107,114 @@ def update_summary(nv_rowData, ordinary_invoices, ocb_range):
     if abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount) > 0.01:
         print(f"OCA identity off by ${abs(total_transfers - total_new_value - net_pref_defenses - ordinary_course_amount):,.2f}")
 
-    return (f"${total_transfers:,.2f}", f"${total_new_value:,.2f}", f"${net_new_value:,.2f}",
-                f"${net_pref_defenses:,.2f}",
-                f"{hist_wavg:.2f}", f"{pref_wavg:.2f}", f"{diff:.2f}%",
-                f"${net_pref_defenses:,.2f}", f"${net_pref_defenses:,.2f}", f"${total_transfers:,.2f}", f"${total_new_value:,.2f}",
+    return (f"${net_pref_defenses:,.2f}", f"${net_pref_defenses:,.2f}", f"${total_transfers:,.2f}", f"${total_new_value:,.2f}",
                 f"${ordinary_course_amount:,.2f}", f"{diff:.2f}%",
-                "fa-solid fa-arrow-trend-up fa-3x" if diff >= 0 else "fa-solid fa-arrow-trend-down fa-3x",
+"fa-solid fa-arrow-trend-up fa-3x" if diff >= 0 else "fa-solid fa-arrow-trend-down fa-3x",
                 f"{dpd_diff:.2f}%",
                 "fa-solid fa-arrow-trend-up fa-3x" if dpd_diff >= 0 else "fa-solid fa-arrow-trend-down fa-3x")
+
+
+@callback(
+    Output("transfers-pref", "rowData"),
+    Input("new_value", "rowData"),
+    prevent_initial_call=True,
+)
+def update_transfers_pref(nv_rowData):
+    st = session.get_state()
+    if st.df_preference is None:
+        return []
+    df = st.df_preference.drop_duplicates(
+        subset=["Transfer Number", "Transfer Amount", "Payment Date"]
+    )[["Transfer Number", "Transfer Amount", "Payment Date", "Check Date"]]
+    df = df.sort_values("Payment Date")
+    return df.to_dict("records")
+
+
+_CONTACT_GROUP_DEFS = [
+    ("Transferee Contact", (
+        "contact_name", "contact_address", "contact_address2", "contact_city",
+        "contact_state", "contact_zip", "contact_phone", "contact_email",
+    )),
+    ("Attorney", (
+        "attorney_name", "attorney_firm", "attorney_address", "attorney_address2",
+        "attorney_city", "attorney_state", "attorney_zip", "attorney_phone",
+        "attorney_email",
+    )),
+    ("Local Counsel", (
+        "local_counsel_name", "local_counsel_firm", "local_counsel_address",
+        "local_counsel_address2", "local_counsel_city", "local_counsel_state",
+        "local_counsel_zip", "local_counsel_phone", "local_counsel_email",
+    )),
+]
+
+_FIELD_LABELS = {
+    "contact_name": "Name", "contact_address": "Address", "contact_address2": "Address 2",
+    "contact_city": "City", "contact_state": "State", "contact_zip": "ZIP",
+    "contact_phone": "Phone", "contact_email": "Email",
+    "attorney_name": "Name", "attorney_firm": "Firm", "attorney_address": "Address",
+    "attorney_address2": "Address 2", "attorney_city": "City", "attorney_state": "State",
+    "attorney_zip": "ZIP", "attorney_phone": "Phone", "attorney_email": "Email",
+    "local_counsel_name": "Name", "local_counsel_firm": "Firm",
+    "local_counsel_address": "Address", "local_counsel_address2": "Address 2",
+    "local_counsel_city": "City", "local_counsel_state": "State",
+    "local_counsel_zip": "ZIP", "local_counsel_phone": "Phone",
+    "local_counsel_email": "Email",
+}
+
+
+def _contact_value(key, value):
+    if key.endswith("_email") and value:
+        return html.A(value, href=f"mailto:{value}",
+                      style={"color": "var(--bs-primary)", "textDecoration": "none"})
+    return value
+
+
+def _contact_section(header, keys, sub):
+    fields = []
+    for key in keys:
+        value = (sub.get(key) or "").strip()
+        if not value:
+            continue
+        fields.append(html.Div([
+            html.Div(_FIELD_LABELS[key],
+                     style={"fontSize": "0.72rem", "textTransform": "uppercase",
+                            "color": "var(--bs-secondary-color)", "fontWeight": "600"}),
+            html.Div(_contact_value(key, value)),
+        ], style={"marginBottom": "8px"}))
+    return html.Div([
+        html.Div(header,
+                 style={"fontWeight": "700", "fontSize": "1rem", "marginBottom": "8px",
+                        "borderBottom": "1px solid var(--bs-border-color)",
+                        "paddingBottom": "4px"}),
+        html.Div(style={"paddingLeft": "16px"}, children=fields),
+    ], style={"marginBottom": "20px"})
+
+
+def _build_contact_panel(subcase_id):
+    sub = store.get_subcase(subcase_id)
+    by_group = {header: keys for header, keys in _CONTACT_GROUP_DEFS}
+    return [
+        _contact_section("Transferee Contact", by_group["Transferee Contact"], sub),
+        html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px"}, children=[
+            html.Div(style={"flex": "1 1 280px", "minWidth": "0"},
+                     children=[_contact_section("Attorney", by_group["Attorney"], sub)]),
+            html.Div(style={"flex": "1 1 280px", "minWidth": "0"},
+                     children=[_contact_section("Local Counsel", by_group["Local Counsel"], sub)]),
+        ]),
+    ]
+
+
+@callback(
+    Output("contact-panel", "children"),
+    Input("subcase-selector", "value"),
+    prevent_initial_call=True,
+)
+def update_contact_panel(subcase_id):
+    if subcase_id is None:
+        return html.Div("Select a subcase to view contact details.",
+                        style={"color": "var(--bs-secondary-color)"})
+    return _build_contact_panel(subcase_id)
+
 
 @callback(
     Output("ocb_grid", "rowData"),
@@ -1142,6 +1281,8 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
         return {"start": r0, "end": r1}, new_start, new_end, step, flag_out
 
     if trig == "ocb-total-range.n_clicks":
+        if st.df_historical.empty:
+            return dash.no_update, start, end, step, dash.no_update
         min_days = int(st.df_historical[metric].min())
         max_days = int(st.df_historical[metric].max())
         new_start = max(-5, min(min(start, min_days), 20))
@@ -2289,6 +2430,7 @@ def cm_boot_create_mode(_):
 
 
 _SC_SUBCASE_FIELD_DEFS = [
+    ("sc-transferee-name", "transferee_name"),
     ("sc-file-number", "file_number"),
     ("sc-filing-date", "filing_date"),
     ("sc-contact-name", "contact_name"),
@@ -2330,6 +2472,45 @@ def populate_sc_subcase(main_id):
         return [], None
     opts = store.list_subcase_options(main_id)
     return opts, opts[0]["value"] if opts else None
+
+
+@callback(
+    Output("sc-new-subcase-btn", "style"),
+    Input("manage-boot", "data"),
+    prevent_initial_call='initial_duplicate',
+)
+def sc_new_subcase_visibility(_):
+    u = auth.current_user
+    if u.role in ("admin", "firm_admin", "case_manager"):
+        return {"display": "block", "marginBottom": "8px"}
+    return {"display": "none"}
+
+
+@callback(
+    Output("sc-subcase", "options", allow_duplicate=True),
+    Output("sc-subcase", "value", allow_duplicate=True),
+    Output("sc-subcase-status", "children", allow_duplicate=True),
+    Input("sc-new-subcase-btn", "n_clicks"),
+    State("sc-main", "value"),
+    prevent_initial_call=True,
+)
+def sc_new_subcase(n, main_id):
+    if not n:
+        raise PreventUpdate
+    user = auth.guard("admin", "firm_admin", "case_manager")
+    if main_id is None:
+        return dash.no_update, dash.no_update, dbc.Alert(
+            "Select a main case first.", color="warning")
+    try:
+        firm_id = store.get_main_by_id(main_id)["firm_id"]
+        new_id = store.create_subcase(main_id, "New Transferee", firm_id=firm_id)
+    except ValueError as e:
+        return dash.no_update, dash.no_update, dbc.Alert(str(e), color="danger")
+    if user.role == "case_manager":
+        store.grant_subcase(user.id, new_id)
+    opts = store.list_subcase_options(main_id)
+    return opts, new_id, dbc.Alert(
+        f"Created subcase 'New Transferee' (ID {new_id}).", color="success")
 
 
 @callback(
@@ -2375,8 +2556,12 @@ def toggle_state_custom(contact_state, attorney_state, local_counsel_state):
 
 @callback(
     Output("sc-subcase-status", "children"),
+    Output("sc-subcase", "options", allow_duplicate=True),
+    Output("sc-subcase", "value", allow_duplicate=True),
     Input("sc-save-subcase", "n_clicks"),
     State("sc-subcase", "value"),
+    State("sc-main", "value"),
+    State("sc-transferee-name", "value"),
     State("sc-file-number", "value"),
     State("sc-filing-date", "value"),
     State("sc-contact-name", "value"),
@@ -2411,7 +2596,8 @@ def toggle_state_custom(contact_state, attorney_state, local_counsel_state):
     prevent_initial_call=True,
 )
 def save_sc_subcase(n,
-                    subcase_id, file_number, filing_date,
+                    subcase_id, main_id,
+                    transferee_name, file_number, filing_date,
                     contact_name, contact_address, contact_address2, contact_city, contact_state,
                     contact_state_custom, contact_zip, contact_phone, contact_email,
                     attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
@@ -2420,7 +2606,7 @@ def save_sc_subcase(n,
                     local_counsel_city, local_counsel_state, local_counsel_state_custom, local_counsel_zip,
                     local_counsel_phone, local_counsel_email):
     if subcase_id is None:
-        return dbc.Alert("Select a subcase first.", color="warning")
+        return dbc.Alert("Select a subcase first.", color="warning"), dash.no_update, dash.no_update
     auth.guard_edit_subcase(subcase_id)
     contact_state = (contact_state_custom or "").strip() if contact_state == CUSTOM_STATE_KEY else contact_state
     attorney_state = (attorney_state_custom or "").strip() if attorney_state == CUSTOM_STATE_KEY else attorney_state
@@ -2428,6 +2614,7 @@ def save_sc_subcase(n,
     try:
         fn = store.update_subcase_metadata(
             subcase_id,
+            transferee_name=transferee_name,
             file_number=file_number, filing_date=filing_date,
             contact_name=contact_name, contact_address=contact_address,
             contact_address2=contact_address2, contact_city=contact_city,
@@ -2445,9 +2632,83 @@ def save_sc_subcase(n,
             local_counsel_zip=local_counsel_zip, local_counsel_phone=local_counsel_phone,
             local_counsel_email=local_counsel_email,
         )
-        return dbc.Alert(f"Saved. File number: {fn}", color="success")
+        opts = store.list_subcase_options(main_id) if main_id is not None else dash.no_update
+        return (dbc.Alert(f"Saved. File number: {fn}", color="success"),
+                opts, subcase_id)
     except ValueError as e:
-        return dbc.Alert(str(e), color="danger")
+        return dbc.Alert(str(e), color="danger"), dash.no_update, dash.no_update
+
+
+@callback(
+    Output("sc-delete-subcase", "style"),
+    Input("manage-boot", "data"),
+    prevent_initial_call='initial_duplicate',
+)
+def sc_delete_subcase_visibility(_):
+    u = auth.current_user
+    if u and u.role in ("admin", "firm_admin", "case_manager"):
+        return {"display": "block", "marginLeft": "auto"}
+    return {"display": "none"}
+
+
+@callback(
+    Output("sc-delete-modal", "is_open"),
+    Output("sc-delete-target", "children"),
+    Input("sc-delete-subcase", "n_clicks"),
+    State("sc-subcase", "value"),
+    prevent_initial_call=True,
+)
+def open_sc_delete(n, subcase_id):
+    if not n:
+        raise PreventUpdate
+    auth.guard("admin", "firm_admin", "case_manager")
+    if subcase_id is None:
+        raise PreventUpdate
+    sc = store.get_subcase(subcase_id)
+    label = f"{sc['transferee_name']} ({sc['display_number']})" if sc['display_number'] else sc['transferee_name']
+    return True, label
+
+
+@callback(
+    Output("sc-delete-modal", "is_open", allow_duplicate=True),
+    Input("sc-delete-cancel", "n_clicks"),
+    prevent_initial_call=True,
+)
+def close_sc_delete(n):
+    if not n:
+        raise PreventUpdate
+    return False
+
+
+@callback(
+    Output("sc-subcase-status", "children", allow_duplicate=True),
+    Output("sc-subcase", "options", allow_duplicate=True),
+    Output("sc-subcase", "value", allow_duplicate=True),
+    Output("sc-delete-modal", "is_open", allow_duplicate=True),
+    Input("sc-delete-confirm", "n_clicks"),
+    State("sc-subcase", "value"),
+    State("sc-main", "value"),
+    prevent_initial_call=True,
+)
+def delete_sc_subcase(n, subcase_id, main_id):
+    if not n:
+        raise PreventUpdate
+    if subcase_id is None:
+        return (dbc.Alert("No subcase selected to delete.", color="warning"),
+                dash.no_update, dash.no_update, False)
+    auth.guard_edit_subcase(subcase_id)
+    try:
+        label = store.delete_subcase(subcase_id)
+        main_opts = store.list_subcase_options(main_id) if main_id is not None else []
+        main_val = main_opts[0]["value"] if main_opts else None
+        session.reset_state()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return (dbc.Alert(str(e) or "Failed to delete subcase.", color="danger"),
+                dash.no_update, dash.no_update, False)
+    return (dbc.Alert(f"Deleted subcase '{label}'.", color="success"),
+            main_opts, main_val, False)
 
 
 def _cm_error_alert(message):

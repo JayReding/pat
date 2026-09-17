@@ -90,8 +90,8 @@ def build_ocb_data(pref_df, hist_df, start=0, end=100, step=5, metric="Invoice t
         pi = p.index[p["bin"] == lab]
         hi = h.index[h["bin"] == lab]
         pc, hc = len(pi), len(hi)
-        p_pct = pc / len(p) * 100
-        h_pct = hc / len(h) * 100
+        p_pct = pc / len(p) * 100 if len(p) else 0.0
+        h_pct = hc / len(h) * 100 if len(h) else 0.0
         pct_diff = (p_pct - h_pct) / h_pct * 100 if h_pct != 0 else 0.0
         rows.append({
             "date_range": lab,
@@ -157,6 +157,8 @@ def ocb_row_index(value, df, start, end):
 
 
 def calc_weighted(df, metric):
+    if df.empty:
+        return 0.0
     return df[metric].mul(df["Transfer Amount"]).sum() / df["Transfer Amount"].sum()
 
 
@@ -171,6 +173,8 @@ def calc_weighted_dpd(df):
 def compare_hist_pref(hist_df, pref_df, metric="Invoice to Payment"):
     hist_wavg = calc_weighted(hist_df, metric)
     pref_wavg = calc_weighted(pref_df, metric)
+    if not hist_wavg:
+        return 0.0
     diff = (pref_wavg - hist_wavg) / hist_wavg * 100
     return diff
 

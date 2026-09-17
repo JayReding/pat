@@ -192,7 +192,101 @@ _META_KEYS = [
 ]
 
 
-def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, **meta_fields):
+def create_subcase(main_case_id, transferee_name, firm_id=1):
+    transferee_name = (transferee_name or '').strip()
+    if not transferee_name:
+        raise ValueError('Transferee name is required.')
+    _require_firm(firm_id)
+    conn = _connect_cases()
+    try:
+        cur = conn.execute(
+            "INSERT INTO subcases (main_case_id, transferee_name, adversary_number, "
+            "created_at, meta, firm_id) VALUES (?, ?, NULL, ?, ?, ?)",
+            (int(main_case_id), transferee_name, datetime.now(timezone.utc).isoformat(),
+             '{}', int(firm_id)),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A subcase named '{transferee_name}' already exists.")
+    finally:
+        conn.close()
+    return cur.lastrowid
+
+
+def _pick_next_subcase(firm_id, main_case_id, excluding):
+    """Smallest remaining subcase id for the same main case, else the firm, else None."""
+    conn = _connect_cases()
+    try:
+        for sql in (
+            "SELECT id FROM subcases WHERE main_case_id = ? AND id != ? ORDER BY id LIMIT 1",
+            "SELECT id FROM subcases WHERE firm_id = ? AND id != ? ORDER BY id LIMIT 1",
+        ):
+            if 'firm_id' in sql:
+                row = conn.execute(sql, (int(firm_id), int(excluding))).fetchone()
+            else:
+                row = conn.execute(sql, (int(main_case_id), int(excluding))).fetchone()
+            if row:
+                return row[0]
+        return None
+    finally:
+        conn.close()
+
+
+def delete_subcase(subcase_id):
+    """Delete a subcase and every row that references it.
+
+    Removes invoice records, case_settings, subcase_grants, and the subcase
+    itself. If the firm's ``app_state.active_subcase_id`` pointed at this
+    subcase, repoint it at the next subcase of the same main case (or the
+    firm), or NULL if none remain.
+
+    Returns a display label for the deleted subcase (for status messages).
+    """
+    subcase_id = int(subcase_id)
+    cc = _connect_cases()
+    try:
+        row = cc.execute(
+            "SELECT s.id, s.main_case_id, s.transferee_name, s.file_number, s.adversary_number, "
+            "s.filing_date, m.firm_id "
+            "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id WHERE s.id = ?",
+            (subcase_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"No subcase with id {subcase_id}")
+        _, main_case_id, name, file_number, adversary_number, filing_date, firm_id = row
+        display = _display_number(adversary_number, filing_date, file_number)
+        label = f"{name} ({display})" if display else name
+
+        cc.execute("DELETE FROM invoice_records WHERE subcase_id = ?", (subcase_id,))
+        cc.execute("DELETE FROM subcases WHERE id = ?", (subcase_id,))
+        cc.commit()
+    finally:
+        cc.close()
+
+    uc = _connect_users()
+    uc.execute("DELETE FROM subcase_grants WHERE subcase_id = ?", (subcase_id,))
+    uc.commit()
+    uc.close()
+
+    sc = _connect_state()
+    try:
+        sc.execute("DELETE FROM case_settings WHERE subcase_id = ?", (subcase_id,))
+        next_id = _pick_next_subcase(firm_id, main_case_id, subcase_id)
+        cur = sc.execute(
+            "UPDATE app_state SET active_subcase_id = ? WHERE active_subcase_id = ?",
+            (next_id, subcase_id))
+        if cur.rowcount == 0:
+            sc.execute(
+                "INSERT INTO app_state (firm_id, active_subcase_id) VALUES (?, ?) "
+                "ON CONFLICT(firm_id) DO UPDATE SET active_subcase_id = excluded.active_subcase_id",
+                (int(firm_id), next_id))
+        sc.commit()
+    finally:
+        sc.close()
+    return label
+
+
+def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, transferee_name=None,
+                            **meta_fields):
     file_number = (file_number or '').strip()
     if not file_number:
         file_number = next_file_number()
@@ -206,6 +300,10 @@ def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, **me
     else:
         filing_date = ''
 
+    transferee = (transferee_name or '').strip() if transferee_name else None
+    if transferee_name is not None and not transferee:
+        raise ValueError('Transferee name cannot be blank.')
+
     conn = _connect_cases()
     try:
         dup = conn.execute(
@@ -214,9 +312,15 @@ def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, **me
         ).fetchone()
         if dup:
             raise ValueError(f"A subcase with file number '{file_number}' already exists.")
+        set_parts = ["file_number = ?", "filing_date = ?", "meta = ?"]
+        vals = [file_number, filing_date, json.dumps(meta_fields)]
+        if transferee is not None:
+            set_parts.append("transferee_name = ?")
+            vals.append(transferee)
+        vals.append(int(subcase_id))
         conn.execute(
-            "UPDATE subcases SET file_number = ?, filing_date = ?, meta = ? WHERE id = ?",
-            (file_number, filing_date, json.dumps(meta_fields), int(subcase_id)),
+            f"UPDATE subcases SET {', '.join(set_parts)} WHERE id = ?",
+            vals,
         )
         conn.commit()
     finally:
