@@ -40,6 +40,15 @@ def init_cases_db():
             jurisdiction   TEXT,
             judge          TEXT,
             petition_date  TEXT    NOT NULL,
+            client_name    TEXT,
+            client_contact TEXT,
+            client_address TEXT,
+            client_address2 TEXT,
+            client_city    TEXT,
+            client_state   TEXT,
+            client_zip     TEXT,
+            client_phone   TEXT,
+            client_email   TEXT,
             created_at     TEXT    NOT NULL,
             firm_id        INTEGER NOT NULL DEFAULT 1
         );
@@ -91,6 +100,11 @@ def init_cases_db():
         conn.execute("ALTER TABLE subcases ADD COLUMN file_number TEXT")
     if 'filing_date' not in cols:
         conn.execute("ALTER TABLE subcases ADD COLUMN filing_date TEXT")
+    mcols = {row[1] for row in conn.execute("PRAGMA table_info(main_cases)").fetchall()}
+    for mcol in ("client_name", "client_contact", "client_address", "client_address2",
+                 "client_city", "client_state", "client_zip", "client_phone", "client_email"):
+        if mcol not in mcols:
+            conn.execute(f"ALTER TABLE main_cases ADD COLUMN {mcol} TEXT")
     conn.commit()
     ensure_file_numbers()
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_subcases_file_number ON subcases(file_number)")
@@ -848,26 +862,25 @@ def delete_user(user_id):
 
 def get_main_by_id(main_id):
     conn = _connect_cases()
+    cols = ["id", "case_name", "case_number", "jurisdiction", "judge", "petition_date",
+            *_CLIENT_FIELDS, "created_at", "firm_id"]
     row = conn.execute(
-        "SELECT id, case_name, case_number, jurisdiction, judge, petition_date, created_at, firm_id "
-        "FROM main_cases WHERE id = ?", (int(main_id),)
+        f"SELECT {', '.join(cols)} FROM main_cases WHERE id = ?", (int(main_id),)
     ).fetchone()
     conn.close()
     if row is None:
         raise ValueError(f"No main case with id {main_id}")
-    return {
-        'id': row[0],
-        'case_name': row[1],
-        'case_number': row[2],
-        'jurisdiction': row[3],
-        'judge': row[4],
-        'petition_date': row[5],
-        'created_at': row[6],
-        'firm_id': row[7],
-    }
+    return dict(zip(cols, row))
 
 
-def _validated_main_fields(case_name, case_number, jurisdiction, judge, petition_date):
+_CLIENT_FIELDS = ("client_name", "client_contact", "client_address", "client_address2",
+                  "client_city", "client_state", "client_zip", "client_phone", "client_email")
+
+
+def _validated_main_fields(case_name, case_number, jurisdiction, judge, petition_date,
+                           client_name=None, client_contact=None, client_address=None,
+                           client_address2=None, client_city=None, client_state=None,
+                           client_zip=None, client_phone=None, client_email=None):
     from datetime import datetime
     name = (case_name or '').strip()
     number = (case_number or '').strip()
@@ -881,20 +894,33 @@ def _validated_main_fields(case_name, case_number, jurisdiction, judge, petition
         raise ValueError('Petition Date must be YYYY-MM-DD.')
     judge = (judge or '').strip() or None
     jurisdiction = jurisdiction or None
-    return name, number, jurisdiction, judge, petition
+    clients = {}
+    for key, value in [
+        ('client_name', client_name), ('client_contact', client_contact),
+        ('client_address', client_address), ('client_address2', client_address2),
+        ('client_city', client_city), ('client_state', client_state),
+        ('client_zip', client_zip), ('client_phone', client_phone),
+        ('client_email', client_email),
+    ]:
+        norm = (str(value) if value is not None else '').strip()
+        clients[key] = norm or None
+    return name, number, jurisdiction, judge, petition, clients
 
 
-def create_main_case(case_name, case_number, jurisdiction, judge, petition_date, firm_id=1):
-    name, number, jurisdiction, judge, petition = _validated_main_fields(
-        case_name, case_number, jurisdiction, judge, petition_date)
+def create_main_case(case_name, case_number, jurisdiction, judge, petition_date, firm_id=1, **client_fields):
+    name, number, jurisdiction, judge, petition, clients = _validated_main_fields(
+        case_name, case_number, jurisdiction, judge, petition_date, **client_fields)
     _require_firm(firm_id)
     conn = _connect_cases()
     try:
+        cols = ["case_name", "case_number", "jurisdiction", "judge", "petition_date",
+                *_CLIENT_FIELDS, "created_at", "firm_id"]
+        vals = [name, number, jurisdiction, judge, petition,
+                *(clients[k] for k in _CLIENT_FIELDS),
+                datetime.now(timezone.utc).isoformat(), int(firm_id)]
         cur = conn.execute(
-            "INSERT INTO main_cases (case_name, case_number, jurisdiction, judge, petition_date, created_at, firm_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, number, jurisdiction, judge, petition,
-             datetime.now(timezone.utc).isoformat(), int(firm_id)),
+            f"INSERT INTO main_cases ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+            vals,
         )
         conn.commit()
     except sqlite3.IntegrityError:
@@ -904,16 +930,18 @@ def create_main_case(case_name, case_number, jurisdiction, judge, petition_date,
     return cur.lastrowid
 
 
-def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petition_date):
-    name, number, jurisdiction, judge, petition = _validated_main_fields(
-        case_name, case_number, jurisdiction, judge, petition_date)
+def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petition_date, **client_fields):
+    name, number, jurisdiction, judge, petition, clients = _validated_main_fields(
+        case_name, case_number, jurisdiction, judge, petition_date, **client_fields)
     conn = _connect_cases()
     try:
+        set_parts = ["case_name=?", "case_number=?", "jurisdiction=?", "judge=?", "petition_date=?"]
+        set_parts += [f"{k}=?" for k in _CLIENT_FIELDS]
+        vals = [name, number, jurisdiction, judge, petition]
+        vals += [clients[k] for k in _CLIENT_FIELDS]
+        vals.append(int(main_id))
         conn.execute(
-            "UPDATE main_cases SET case_name=?, case_number=?, jurisdiction=?, judge=?, petition_date=? "
-            "WHERE id=?",
-            (name, number, jurisdiction, judge, petition, int(main_id)),
-        )
+            f"UPDATE main_cases SET {', '.join(set_parts)} WHERE id=?", vals)
         conn.commit()
     except sqlite3.IntegrityError:
         raise ValueError(f"A main case named '{name}' already exists.")

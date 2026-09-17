@@ -113,6 +113,20 @@ def _db_custom_states():
     return extras
 
 
+def _db_custom_states_main():
+    conn = store._connect_cases()
+    try:
+        rows = conn.execute("SELECT client_state FROM main_cases").fetchall()
+    finally:
+        conn.close()
+    extras = set()
+    for (state,) in rows:
+        v = (state or '').strip()
+        if v and v not in STATE_SET and v != CUSTOM_STATE_KEY:
+            extras.add(v)
+    return extras
+
+
 def _state_options_for(extra):
     values = sorted(set(STATE_OPTIONS) | set(extra or []), key=str.lower)
     return values + [{"label": "✏️ Type your own state…", "value": CUSTOM_STATE_KEY}]
@@ -514,16 +528,31 @@ def _cm_field(label, cid, ftype="text"):
     ])
 
 
-def _cm_state_field(label, cid, cid_custom, cid_wrap):
+def _cm_state_field(label, cid, cid_custom, cid_wrap, options=None):
+    if options is None:
+        options = _state_options_for(_db_custom_states())
     return html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
         html.Label(label, htmlFor=cid, style={"fontWeight": "600"}),
-        dcc.Dropdown(id=cid, options=_state_options_for(_db_custom_states()),
+        dcc.Dropdown(id=cid, options=options,
                      clearable=False, searchable=True, style={"fontSize": "1rem"}),
         html.Div(id=cid_wrap, style={"display": "none", "marginTop": "4px"}, children=[
             dbc.Input(id=cid_custom, className="form-control",
                       style={"height": "50px", "fontSize": "1rem"}),
         ]),
     ])
+
+
+_CM_CLIENT_FIELD_DEFS = [
+    ("cm-client-name",     "client_name"),
+    ("cm-client-contact",  "client_contact"),
+    ("cm-client-address",  "client_address"),
+    ("cm-client-address2", "client_address2"),
+    ("cm-client-city",     "client_city"),
+    ("cm-client-state",    "client_state"),
+    ("cm-client-zip",      "client_zip"),
+    ("cm-client-phone",    "client_phone"),
+    ("cm-client-email",    "client_email"),
+]
 
 
 def _manage_header():
@@ -639,6 +668,22 @@ def _maincase_page():
                 ]),
                 _cm_field('Judge', "cm-judge"),
                 _cm_field('Petition Date (YYYY-MM-DD)', "cm-petition-date", "date"),
+                html.Hr(style={"margin": "20px 0"}),
+                html.Label('Client Information', style={"fontWeight": "600", "display": "block", "marginBottom": "12px"}),
+                _cm_field('Client Name', "cm-client-name"),
+                _cm_field('Client Contact', "cm-client-contact"),
+                _cm_field('Client Address 1', "cm-client-address"),
+                _cm_field('Client Address 2', "cm-client-address2"),
+                html.Div(className="d-flex", style={"gap": "8px", "maxWidth": "640px"}, children=[
+                    html.Div(style={"flex": "1 1 0"}, children=[_cm_field('City', "cm-client-city")]),
+                    html.Div(style={"flex": "1 1 0"}, children=[
+                        _cm_state_field('State', "cm-client-state", "cm-client-state-custom", "cm-client-state-custom-wrap",
+                                        options=_state_options_for(_db_custom_states_main()))
+                    ]),
+                    html.Div(style={"flex": "1 1 0"}, children=[_cm_field('ZIP', "cm-client-zip")]),
+                ]),
+                _cm_field('Client Phone', "cm-client-phone"),
+                _cm_field('Client Email', "cm-client-email", "email"),
                 dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
                 dcc.Store(id="cm-create-mode", data=False),
             ]),
@@ -2147,11 +2192,13 @@ def manage_users(c_create, c_role, c_reset, c_toggle, c_firm, c_delete,
     Output("cm-jurisdiction", "value"),
     Output("cm-judge", "value"),
     Output("cm-petition-date", "value"),
+    *[Output(cid, "value") for cid, _ in _CM_CLIENT_FIELD_DEFS],
+    Output("cm-client-state-custom", "value"),
     Input("cm-new-btn", "n_clicks"),
     prevent_initial_call=True,
 )
 def start_new_main(n_clicks):
-    return True, None, "", "", "", "", ""
+    return (True, None, "", "", "", "", "") + ("",) * len(_CM_CLIENT_FIELD_DEFS) + ("",)
 
 
 @callback(
@@ -2171,29 +2218,51 @@ def reset_create_mode(main_id):
     Output("cm-jurisdiction", "value"),
     Output("cm-judge", "value"),
     Output("cm-petition-date", "value"),
+    *[Output(cid, "value") for cid, _ in _CM_CLIENT_FIELD_DEFS],
     Output("cm-case-name", "disabled"),
     Output("cm-case-number", "disabled"),
     Output("cm-jurisdiction", "disabled"),
     Output("cm-judge", "disabled"),
     Output("cm-petition-date", "disabled"),
+    *[Output(cid, "disabled") for cid, _ in _CM_CLIENT_FIELD_DEFS],
+    Output("cm-client-state-custom", "value"),
+    Output("cm-client-state-custom", "disabled"),
+    Output("cm-client-state", "options"),
     Output("cm-save", "disabled"),
     Output("cm-save", "children"),
     Input("cm-main", "value"),
     Input("cm-create-mode", "data"),
 )
 def build_cm_details(main_id, create_mode):
+    base_opts = _state_options_for(_db_custom_states_main())
+    client_n = len(_CM_CLIENT_FIELD_DEFS)
     if main_id is None:
         if create_mode:
-            return "", "", "", "", "", False, False, False, False, False, False, "Create Main Case"
-        return (None,) * 5 + (True,) * 5 + (False, "Save Changes")
+            return ("",) * 5 + ("",) * client_n + (False,) * 5 + (False,) * client_n + \
+                   ("", False, base_opts, False, "Create Main Case")
+        return (None,) * 5 + (None,) * client_n + (True,) * 5 + (True,) * client_n + \
+               ("", True, base_opts, False, "Save Changes")
     m = store.get_main_by_id(main_id)
     can_edit = auth.can_edit_main(auth.current_user, main_id)
-    return (
-        m["case_name"], m["case_number"], m.get("jurisdiction") or "", m.get("judge") or "",
-        m.get("petition_date") or "",
-        not can_edit, not can_edit, not can_edit, not can_edit, not can_edit,
-        not can_edit, "Save Changes",
-    )
+    case_values = (m["case_name"], m["case_number"], m.get("jurisdiction") or "",
+                   m.get("judge") or "", m.get("petition_date") or "")
+    client_values = tuple(m.get(key) or "" for _, key in _CM_CLIENT_FIELD_DEFS)
+    case_disabled = (not can_edit,) * 5
+    client_disabled = (not can_edit,) * client_n
+    stored_state = m.get("client_state") or ""
+    extra_opts = base_opts
+    if stored_state and stored_state not in STATE_SET:
+        extra_opts = _state_options_for(_db_custom_states_main() | {stored_state})
+    return case_values + client_values + case_disabled + client_disabled + \
+           ("", not can_edit, extra_opts, not can_edit, "Save Changes")
+
+
+@callback(
+    Output("cm-client-state-custom-wrap", "style"),
+    Input("cm-client-state", "value"),
+)
+def toggle_cm_state_custom(client_state):
+    return {"display": "block"} if client_state == CUSTOM_STATE_KEY else {"display": "none"}
 
 
 @callback(
@@ -2401,15 +2470,34 @@ def _cm_error_alert(message):
     State("cm-jurisdiction", "value"),
     State("cm-judge", "value"),
     State("cm-petition-date", "value"),
+    State("cm-client-name", "value"),
+    State("cm-client-contact", "value"),
+    State("cm-client-address", "value"),
+    State("cm-client-address2", "value"),
+    State("cm-client-city", "value"),
+    State("cm-client-state", "value"),
+    State("cm-client-zip", "value"),
+    State("cm-client-phone", "value"),
+    State("cm-client-email", "value"),
+    State("cm-client-state-custom", "value"),
     State("cm-firm-select", "value"),
     prevent_initial_call=True
 )
-def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge, petition, cm_firm):
+def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge, petition,
+              client_name, client_contact, client_address, client_address2,
+              client_city, client_state, client_zip, client_phone, client_email,
+              client_state_custom, cm_firm):
+    client_state = (client_state_custom or "").strip() if client_state == CUSTOM_STATE_KEY else (client_state or "").strip()
     if create_mode:
         user = auth.guard("admin", "firm_admin", "case_manager")
         try:
             fid = int(cm_firm) if user.role == "admin" and cm_firm else auth.firm_scope(user)
-            new_id = store.create_main_case(name, number, jurisdiction, judge, petition, firm_id=fid)
+            new_id = store.create_main_case(name, number, jurisdiction, judge, petition, firm_id=fid,
+                                            client_name=client_name, client_contact=client_contact,
+                                            client_address=client_address, client_address2=client_address2,
+                                            client_city=client_city, client_state=client_state,
+                                            client_zip=client_zip, client_phone=client_phone,
+                                            client_email=client_email)
         except ValueError as e:
             status = _cm_error_alert(str(e))
             return status, dash.no_update, dash.no_update, dash.no_update
@@ -2424,7 +2512,12 @@ def save_main(n_clicks, main_id, create_mode, name, number, jurisdiction, judge,
             dash.no_update, dash.no_update, dash.no_update
     auth.guard_edit_main(main_id)
     try:
-        store.update_main_case(main_id, name, number, jurisdiction, judge, petition)
+        store.update_main_case(main_id, name, number, jurisdiction, judge, petition,
+                               client_name=client_name, client_contact=client_contact,
+                               client_address=client_address, client_address2=client_address2,
+                               client_city=client_city, client_state=client_state,
+                               client_zip=client_zip, client_phone=client_phone,
+                               client_email=client_email)
     except ValueError as e:
         status = _cm_error_alert(str(e))
         return status, dash.no_update, dash.no_update, dash.no_update
