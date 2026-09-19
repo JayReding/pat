@@ -15,6 +15,7 @@ from dateutil.relativedelta import relativedelta
 from plotly import graph_objects as go
 
 import analysis
+import backup
 import export_excel
 import export_pdf
 import store
@@ -641,6 +642,7 @@ def _make_firm_options(prefix, out_id):
 _make_firm_init("cm")
 _make_firm_init("sc")
 _make_firm_init("users")
+_make_firm_init("bk")
 _make_firm_options("cm", "cm-main")
 _make_firm_options("sc", "sc-main")
 _make_firm_options("users", "grant-main")
@@ -655,6 +657,7 @@ def _manage_sidebar(active):
             html.Div("Case Management", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
             dbc.NavLink("Main Case Management", href="/manage", active=(active == "main"), className="mb-2"),
             dbc.NavLink("Subcase Management", href="/manage/subcases", active=(active == "subcase"), className="mb-2"),
+            dbc.NavLink("Backup and Restore", href="/manage/backup", active=(active == "backup"), className="mb-2"),
             html.Div("Administration", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
             dbc.NavLink("User Management", id="admin-nav-btn", href="/manage/users", active=(active == "users"), className="mb-2"),
             dbc.NavLink("Email Settings", id="email-settings-nav-btn", href="/manage/email-settings", active=(active == "email-settings")),
@@ -799,6 +802,144 @@ def _subcase_page():
                         ]),
                     ],
                 ),
+            ]),
+        ]),
+    ])
+
+
+def _backup_page():
+    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
+        _manage_header(),
+        dcc.Store(id="manage-boot", data=True),
+        html.Hr(),
+        dbc.Row([
+            _manage_sidebar("backup"),
+            dbc.Col(width=10, children=[
+                html.H3("Backup and Restore", className="mb-3"),
+                dbc.Card(className="mb-4", children=[
+                    dbc.CardHeader(html.Span([
+                        html.I(className="fa-solid fa-download me-2"), "Backup",
+                    ])),
+                    dbc.CardBody(children=[
+                        _firm_picker("bk"),
+                        html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                            html.Label("Backup scope", style={"fontWeight": "600"}),
+                            dbc.RadioItems(
+                                id="bk-scope",
+                                options=[
+                                    {"label": "Main case (includes all of its subcases)", "value": "main"},
+                                    {"label": "Single subcase", "value": "subcase"},
+                                ],
+                                value="main",
+                                inline=True,
+                            ),
+                        ]),
+                        html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                            html.Label("Case to back up", htmlFor="bk-target",
+                                       style={"fontWeight": "600"}),
+                            dcc.Dropdown(id="bk-target", placeholder="Select a case…"),
+                        ]),
+                        html.P("Backups include the case metadata, all invoice records, "
+                               "and per-subcase analysis settings.",
+                               className="text-muted"),
+                        dbc.Button([html.I(className="fa-solid fa-download me-2"),
+                                    "Create Backup"],
+                                   id="bk-backup-btn", color="primary", n_clicks=0),
+                        html.Div(id="bk-status", className="mt-3"),
+                        dcc.Download(id="bk-download"),
+                    ]),
+                ]),
+                dbc.Card(children=[
+                    dbc.CardHeader(html.Span([
+                        html.I(className="fa-solid fa-upload me-2"), "Restore",
+                    ])),
+                    dbc.CardBody(children=[
+                        dcc.Upload(
+                            id="bk-upload",
+                            accept=".json.gz,.gz,.json",
+                            multiple=False,
+                            style={
+                                "width": "100%", "borderWidth": "2px",
+                                "borderStyle": "dashed", "borderRadius": "8px",
+                                "textAlign": "center", "cursor": "pointer",
+                                "padding": "28px 16px",
+                                "backgroundColor": "var(--bs-light)",
+                            },
+                            children=html.Div([
+                                html.I(className="fa-solid fa-cloud-arrow-up fa-2x mb-2"),
+                                html.Div(dbc.Button(
+                                    [html.I(className="fa-solid fa-folder-open me-2"),
+                                     "Choose backup file…"],
+                                    color="primary", size="lg"),
+                                    className="mb-2"),
+                                html.Div("or drag and drop a .json.gz backup file here",
+                                         className="text-muted"),
+                            ]),
+                        ),
+                        html.Div(id="bk-restore-summary", className="mt-3"),
+                        dcc.Store(id="bk-restore-pending", data=None),
+                        html.Div(id="bk-restore-start-wrap", style={"display": "none"}, children=[
+                            html.Hr(),
+                            html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                                html.Label("Restore mode", style={"fontWeight": "600"}),
+                                dbc.RadioItems(
+                                    id="bk-restore-mode",
+                                    options=[
+                                        {"label": "Create as new", "value": "create"},
+                                        {"label": "Overwrite an existing case", "value": "overwrite"},
+                                    ],
+                                    value="create",
+                                    inline=True,
+                                ),
+                            ]),
+                            html.Div(id="bk-restore-main-wrap",
+                                     className="mb-2",
+                                     style={"display": "none", "maxWidth": "640px"}, children=[
+                                html.Label("Existing main case to overwrite",
+                                           htmlFor="bk-restore-main-target",
+                                           style={"fontWeight": "600"}),
+                                dcc.Dropdown(id="bk-restore-main-target",
+                                             placeholder="Select a main case…"),
+                            ]),
+                            html.Div(id="bk-restore-sub-main-wrap",
+                                     className="mb-2",
+                                     style={"display": "none", "maxWidth": "640px"}, children=[
+                                html.Label("Main case to attach the restored subcase to",
+                                           htmlFor="bk-restore-sub-main",
+                                           style={"fontWeight": "600"}),
+                                dcc.Dropdown(id="bk-restore-sub-main",
+                                             placeholder="Select a main case…"),
+                            ]),
+                            html.Div(id="bk-restore-sub-wrap",
+                                     className="mb-2",
+                                     style={"display": "none", "maxWidth": "640px"}, children=[
+                                html.Label("Existing subcase to overwrite",
+                                           htmlFor="bk-restore-sub-target",
+                                           style={"fontWeight": "600"}),
+                                dcc.Dropdown(id="bk-restore-sub-target",
+                                             placeholder="Select a subcase…"),
+                            ]),
+                            dbc.Button([html.I(className="fa-solid fa-upload me-2"),
+                                        "Review & Restore"],
+                                       id="bk-restore-btn", color="primary", n_clicks=0),
+                            html.Div(id="bk-restore-status", className="mt-3"),
+                        ]),
+                        dbc.Modal(
+                            id="bk-restore-modal",
+                            is_open=False,
+                            centered=True,
+                            children=[
+                                dbc.ModalHeader(dbc.ModalTitle("Confirm restore")),
+                                dbc.ModalBody(html.Div(id="bk-restore-modal-body")),
+                                dbc.ModalFooter([
+                                    dbc.Button("Cancel", id="bk-restore-cancel",
+                                               className="ms-auto", color="secondary"),
+                                    dbc.Button("Restore", id="bk-restore-confirm", color="danger"),
+                                ]),
+                            ],
+                        ),
+                    ]),
+                ]),
             ]),
         ]),
     ])
@@ -1042,6 +1183,7 @@ dash.register_page("account", path="/manage/account", layout=_account_page(), ti
 dash.register_page("firm-options", path="/manage/firm-options", layout=_firm_options_page(), title="Firm Options", name="Firm Options")
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
 dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
+dash.register_page("backup", path="/manage/backup", layout=_backup_page(), title="Backup and Restore", name="Backup and Restore")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
 dash.register_page("email-settings", path="/manage/email-settings", layout=_email_settings_page(), title="Email Settings", name="Email Settings")
 
@@ -2830,6 +2972,277 @@ def manage_grants(c_gm, c_rm, c_gs, c_rs, user_id, main_id, subcase_id, users_fi
     scope_fid = int(users_firm) if u.role == "admin" and users_firm else auth.firm_scope(u)
     scope_users = [x["id"] for x in store.list_users(firm_id=scope_fid)]
     return store.list_all_grants(user_ids=scope_users), status
+
+
+@callback(
+    Output("bk-target", "options", allow_duplicate=True),
+    Output("bk-target", "value"),
+    Input("bk-firm-select", "value"),
+    Input("bk-scope", "value"),
+    prevent_initial_call="initial_duplicate",
+)
+def bk_target_options(bk_firm, scope):
+    u = auth.current_user
+    firm_id = int(bk_firm) if u.role == "admin" and bk_firm else auth.firm_scope(u)
+    if scope == "subcase":
+        opts = store.list_subcase_options(firm_id=firm_id)
+    else:
+        opts = store.list_main_options(firm_id=firm_id)
+    return opts, None
+
+
+@callback(
+    Output("bk-status", "children"),
+    Output("bk-download", "data"),
+    Input("bk-backup-btn", "n_clicks"),
+    State("bk-scope", "value"),
+    State("bk-target", "value"),
+    State("bk-firm-select", "value"),
+    prevent_initial_call=True,
+)
+def bk_backup(n_clicks, scope, target_id, bk_firm):
+    user = auth.guard("admin", "firm_admin", "case_manager")
+    if scope not in ("main", "subcase"):
+        return dbc.Alert("Select a backup scope first.", color="warning"), dash.no_update
+    if target_id is None:
+        return dbc.Alert("Select a case to back up first.", color="warning"), dash.no_update
+    firm_id = int(bk_firm) if user.role == "admin" and bk_firm else auth.firm_scope(user)
+    try:
+        if scope == "main":
+            main = store.get_main_by_id(target_id)
+            label = main["case_name"]
+            if firm_id is not None and int(main["firm_id"]) != int(firm_id):
+                raise ValueError("That main case is outside your firm.")
+        else:
+            sub = store.get_subcase(target_id)
+            label = sub["transferee_name"]
+            if firm_id is not None and int(sub["firm_id"]) != int(firm_id):
+                raise ValueError("That subcase is outside your firm.")
+        payload = backup.build_backup(scope, target_id, username=user.username)
+        blob = backup.backup_bytes(payload)
+    except ValueError as e:
+        return _cm_error_alert(str(e)), dash.no_update
+    status = dbc.Alert(f"Backed up {backup.summary(payload)}.", color="success")
+    return status, dcc.send_bytes(lambda buf: buf.write(blob),
+                                  backup.backup_filename(scope, label))
+
+
+def _bk_restore_plan(pending, mode, main_target, sub_main, sub_target, bk_firm):
+    """Validate restore selections against a parsed backup payload.
+
+    Returns (plan, error_alert); plan holds scope/mode/firm_id/target ids,
+    a label, and a human-readable detail string for the confirm dialog.
+    """
+    user = auth.guard("admin", "firm_admin", "case_manager")
+    if not pending or pending.get("scope") not in ("main", "subcase"):
+        return None, dbc.Alert("Upload a valid backup file first.", color="warning")
+    if mode not in ("create", "overwrite"):
+        return None, dbc.Alert("Select a restore mode first.", color="warning")
+    scope = pending["scope"]
+    firm_id = int(bk_firm) if user.role == "admin" and bk_firm else auth.firm_scope(user)
+    counts = {k: len(pending.get(k) or [])
+              for k in ("main_cases", "subcases", "invoice_records", "case_settings")}
+    what = (f"{counts['subcases']} subcase(s), {counts['invoice_records']} invoice row(s), "
+            f"{counts['case_settings']} settings row(s)")
+    if scope == "main":
+        mains = pending.get("main_cases") or []
+        name = (mains[0].get("case_name") if mains else "") or "main case"
+        if mode == "create":
+            if firm_id is None:
+                return None, dbc.Alert("Select a firm to restore into first.", color="warning")
+            return {"scope": scope, "mode": mode, "firm_id": firm_id, "label": name,
+                    "detail": f"This will create a new main case '{name}' with {what}."}, None
+        if main_target is None:
+            return None, dbc.Alert("Select the main case to overwrite.", color="warning")
+        try:
+            target = store.get_main_by_id(main_target)
+        except ValueError as e:
+            return None, _cm_error_alert(str(e))
+        if firm_id is not None and int(target["firm_id"]) != int(firm_id):
+            return None, _cm_error_alert("That main case is outside your firm.")
+        if not auth.can_edit_main(user, int(main_target)):
+            return None, _cm_error_alert("You do not have permission to modify that main case.")
+        return {"scope": scope, "mode": mode, "firm_id": int(target["firm_id"]),
+                "target_main_id": int(main_target), "label": target["case_name"],
+                "detail": (f"This will replace ALL data in main case '{target['case_name']}' "
+                           f"with the backup of '{name}' ({what}). The target's existing "
+                           f"subcases, invoice records, and settings will be deleted.")}, None
+    subs = pending.get("subcases") or []
+    sub_name = (subs[0].get("transferee_name") if subs else "") or "subcase"
+    if mode == "create":
+        if sub_main is None:
+            return None, dbc.Alert(
+                "Select the main case to attach the restored subcase to.", color="warning")
+        try:
+            parent = store.get_main_by_id(sub_main)
+        except ValueError as e:
+            return None, _cm_error_alert(str(e))
+        if firm_id is not None and int(parent["firm_id"]) != int(firm_id):
+            return None, _cm_error_alert("That main case is outside your firm.")
+        if not auth.can_edit_main(user, int(sub_main)):
+            return None, _cm_error_alert("You do not have permission to modify that main case.")
+        return {"scope": scope, "mode": mode, "firm_id": int(parent["firm_id"]),
+                "target_main_id": int(sub_main), "label": sub_name,
+                "detail": (f"This will create a new subcase '{sub_name}' under main case "
+                           f"'{parent['case_name']}' with {what}.")}, None
+    if sub_target is None:
+        return None, dbc.Alert("Select the subcase to overwrite.", color="warning")
+    try:
+        target = store.get_subcase(sub_target)
+    except ValueError as e:
+        return None, _cm_error_alert(str(e))
+    if firm_id is not None and int(target["firm_id"]) != int(firm_id):
+        return None, _cm_error_alert("That subcase is outside your firm.")
+    if not auth.can_edit_subcase(user, int(sub_target)):
+        return None, _cm_error_alert("You do not have permission to modify that subcase.")
+    return {"scope": scope, "mode": mode, "firm_id": int(target["firm_id"]),
+            "target_subcase_id": int(sub_target), "label": target["transferee_name"],
+            "detail": (f"This will replace ALL data in subcase '{target['transferee_name']}' "
+                       f"with the backup of '{sub_name}' ({what}). Its existing invoice "
+                       f"records and settings will be deleted.")}, None
+
+
+@callback(
+    Output("bk-restore-pending", "data", allow_duplicate=True),
+    Output("bk-restore-summary", "children"),
+    Output("bk-restore-start-wrap", "style", allow_duplicate=True),
+    Input("bk-upload", "contents"),
+    State("bk-upload", "filename"),
+    prevent_initial_call=True,
+)
+def bk_restore_upload(contents, filename):
+    import base64
+    if not contents:
+        raise PreventUpdate
+    try:
+        _, content_string = contents.split(",", 1)
+    except ValueError:
+        content_string = contents
+    try:
+        payload = backup.load_backup(base64.b64decode(content_string))
+    except Exception as e:
+        return None, dbc.Alert(f"Could not read {filename or 'file'}: {e}",
+                               color="danger"), {"display": "none"}
+    detail = f"Backup of {backup.summary(payload)}."
+    created = payload.get("created_at") or "unknown date"
+    by = payload.get("created_by")
+    detail += f" Created {created}" + (f" by {by}." if by else ".")
+    return (payload,
+            dbc.Alert([html.Strong(f"Loaded {filename}. "), detail], color="success"),
+            {"display": "block"})
+
+
+@callback(
+    Output("bk-restore-main-wrap", "style"),
+    Output("bk-restore-sub-main-wrap", "style"),
+    Output("bk-restore-sub-wrap", "style"),
+    Output("bk-restore-main-target", "options"),
+    Output("bk-restore-main-target", "value"),
+    Output("bk-restore-sub-main", "options"),
+    Output("bk-restore-sub-main", "value"),
+    Output("bk-restore-sub-target", "options"),
+    Output("bk-restore-sub-target", "value"),
+    Input("bk-restore-pending", "data"),
+    Input("bk-restore-mode", "value"),
+    Input("bk-firm-select", "value"),
+)
+def bk_restore_options(pending, mode, bk_firm):
+    hidden = {"display": "none"}
+    shown = {"display": "block", "maxWidth": "640px", "marginBottom": "8px"}
+    if not pending:
+        return hidden, hidden, hidden, [], None, [], None, [], None
+    u = auth.current_user
+    firm_id = int(bk_firm) if u.role == "admin" and bk_firm else auth.firm_scope(u)
+    scope = pending.get("scope")
+    if scope == "main" and mode == "overwrite":
+        return shown, hidden, hidden, store.list_main_options(firm_id=firm_id), None, [], None, [], None
+    if scope == "subcase" and mode == "create":
+        return hidden, shown, hidden, [], None, store.list_main_options(firm_id=firm_id), None, [], None
+    if scope == "subcase" and mode == "overwrite":
+        return hidden, hidden, shown, [], None, [], None, \
+            store.list_subcase_options(firm_id=firm_id), None
+    return hidden, hidden, hidden, [], None, [], None, [], None
+
+
+@callback(
+    Output("bk-restore-status", "children", allow_duplicate=True),
+    Output("bk-restore-modal", "is_open", allow_duplicate=True),
+    Output("bk-restore-modal-body", "children"),
+    Input("bk-restore-btn", "n_clicks"),
+    State("bk-restore-pending", "data"),
+    State("bk-restore-mode", "value"),
+    State("bk-restore-main-target", "value"),
+    State("bk-restore-sub-main", "value"),
+    State("bk-restore-sub-target", "value"),
+    State("bk-firm-select", "value"),
+    prevent_initial_call=True,
+)
+def bk_restore_arm(n_clicks, pending, mode, main_target, sub_main, sub_target, bk_firm):
+    plan, error = _bk_restore_plan(pending, mode, main_target, sub_main, sub_target, bk_firm)
+    if error is not None:
+        return error, False, dash.no_update
+    body = [html.P(plan["detail"]),
+            html.P("This action cannot be undone.", className="text-muted")]
+    return dash.no_update, True, body
+
+
+@callback(
+    Output("bk-restore-modal", "is_open", allow_duplicate=True),
+    Input("bk-restore-cancel", "n_clicks"),
+    prevent_initial_call=True,
+)
+def bk_restore_cancel(_):
+    return False
+
+
+@callback(
+    Output("bk-restore-status", "children", allow_duplicate=True),
+    Output("bk-restore-modal", "is_open", allow_duplicate=True),
+    Output("bk-restore-pending", "data", allow_duplicate=True),
+    Output("bk-restore-start-wrap", "style", allow_duplicate=True),
+    Output("bk-target", "options", allow_duplicate=True),
+    Input("bk-restore-confirm", "n_clicks"),
+    State("bk-restore-pending", "data"),
+    State("bk-restore-mode", "value"),
+    State("bk-restore-main-target", "value"),
+    State("bk-restore-sub-main", "value"),
+    State("bk-restore-sub-target", "value"),
+    State("bk-firm-select", "value"),
+    State("bk-scope", "value"),
+    prevent_initial_call=True,
+)
+def bk_restore_confirm(n_clicks, pending, mode, main_target, sub_main, sub_target,
+                       bk_firm, bk_scope):
+    hidden = {"display": "none"}
+    try:
+        plan, error = _bk_restore_plan(pending, mode, main_target, sub_main,
+                                       sub_target, bk_firm)
+        if error is not None:
+            return error, False, dash.no_update, dash.no_update, dash.no_update
+        if plan["scope"] == "main":
+            result = store.restore_main_case(
+                pending, plan["mode"], firm_id=plan["firm_id"],
+                target_main_id=plan.get("target_main_id"))
+        else:
+            result = store.restore_subcase(
+                pending, plan["mode"], firm_id=plan["firm_id"],
+                target_main_id=plan.get("target_main_id"),
+                target_subcase_id=plan.get("target_subcase_id"))
+    except ValueError as e:
+        return _cm_error_alert(str(e)), False, dash.no_update, dash.no_update, dash.no_update
+    counts = result["counts"]
+    status = dbc.Alert(
+        f"Restored {result['label']} — {counts['subcases']} subcase(s), "
+        f"{counts['invoice_records']} invoice row(s), "
+        f"{counts['case_settings']} settings row(s).",
+        color="success")
+    u = auth.current_user
+    firm = int(bk_firm) if u.role == "admin" and bk_firm else auth.firm_scope(u)
+    if bk_scope == "subcase":
+        opts = store.list_subcase_options(firm_id=firm)
+    else:
+        opts = store.list_main_options(firm_id=firm)
+    return status, False, None, hidden, opts
 
 
 @callback(

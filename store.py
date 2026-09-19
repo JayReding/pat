@@ -1135,3 +1135,392 @@ def list_all_grants(user_ids=None):
         {'user_id': r[0], 'username': r[1], 'main_case_id': r[2], 'subcase_id': r[3], 'level': r[4]}
         for r in rows
     ]
+
+
+def _rows_to_dicts(conn, sql, params=()):
+    cur = conn.execute(sql, params)
+    columns = [d[0] for d in cur.description]
+    return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def build_main_case_backup(main_id):
+    """Collect every row a main-case backup must carry (read-only).
+
+    Includes the main_cases row, all of its subcases (incl. meta),
+    their invoice records, and their per-subcase analysis settings.
+    Grants/permissions are intentionally excluded.
+    """
+    main_id = int(main_id)
+    cc = _connect_cases()
+    try:
+        main_rows = _rows_to_dicts(cc, "SELECT * FROM main_cases WHERE id = ?", (main_id,))
+        if not main_rows:
+            raise ValueError(f"No main case with id {main_id}")
+        sub_rows = _rows_to_dicts(
+            cc, "SELECT * FROM subcases WHERE main_case_id = ? ORDER BY id", (main_id,))
+        sub_ids = [r["id"] for r in sub_rows]
+        if sub_ids:
+            placeholders = ", ".join("?" for _ in sub_ids)
+            inv_rows = _rows_to_dicts(
+                cc,
+                f"SELECT * FROM invoice_records WHERE subcase_id IN ({placeholders}) "
+                "ORDER BY subcase_id, id",
+                tuple(sub_ids),
+            )
+        else:
+            inv_rows = []
+    finally:
+        cc.close()
+    sc = _connect_state()
+    try:
+        if sub_ids:
+            placeholders = ", ".join("?" for _ in sub_ids)
+            set_rows = _rows_to_dicts(
+                sc,
+                f"SELECT * FROM case_settings WHERE subcase_id IN ({placeholders})",
+                tuple(sub_ids),
+            )
+        else:
+            set_rows = []
+    finally:
+        sc.close()
+    return {
+        "main_cases": main_rows,
+        "subcases": sub_rows,
+        "invoice_records": inv_rows,
+        "case_settings": set_rows,
+    }
+
+
+def build_subcase_backup(subcase_id):
+    """Collect every row a single-subcase backup must carry (read-only).
+
+    Includes the parent main_cases row (restore context), the subcase
+    row (incl. meta), its invoice records, and its analysis settings.
+    Grants/permissions are intentionally excluded.
+    """
+    subcase_id = int(subcase_id)
+    cc = _connect_cases()
+    try:
+        sub_rows = _rows_to_dicts(cc, "SELECT * FROM subcases WHERE id = ?", (subcase_id,))
+        if not sub_rows:
+            raise ValueError(f"No subcase with id {subcase_id}")
+        main_rows = _rows_to_dicts(
+            cc, "SELECT * FROM main_cases WHERE id = ?", (sub_rows[0]["main_case_id"],))
+        inv_rows = _rows_to_dicts(
+            cc, "SELECT * FROM invoice_records WHERE subcase_id = ? ORDER BY id",
+            (subcase_id,),
+        )
+    finally:
+        cc.close()
+    sc = _connect_state()
+    try:
+        set_rows = _rows_to_dicts(
+            sc, "SELECT * FROM case_settings WHERE subcase_id = ?", (subcase_id,))
+    finally:
+        sc.close()
+    return {
+        "main_cases": main_rows,
+        "subcases": sub_rows,
+        "invoice_records": inv_rows,
+        "case_settings": set_rows,
+    }
+
+
+def _table_columns(conn, table):
+    return [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
+
+def _insert_dict_rows(conn, table, rows, defaults=None, exclude=("id",)):
+    """Insert a list of dict rows; returns new rowids in order.
+
+    Columns come from the live table (quoted); ``exclude``d columns are
+    skipped (primary keys auto-assign); ``defaults`` override every row.
+    """
+    skip = set(exclude or ())
+    cols = [c for c in _table_columns(conn, table) if c not in skip]
+    quoted = ", ".join(f'"{c}"' for c in cols)
+    placeholders = ", ".join("?" for _ in cols)
+    new_ids = []
+    for row in rows:
+        merged = dict(row)
+        if defaults:
+            merged.update(defaults)
+        cur = conn.execute(
+            f"INSERT INTO {table} ({quoted}) VALUES ({placeholders})",
+            [merged.get(c) for c in cols],
+        )
+        new_ids.append(cur.lastrowid)
+    return new_ids
+
+
+def _existing_file_numbers(conn, exclude_subcase_id=None):
+    sql = "SELECT file_number FROM subcases WHERE file_number IS NOT NULL AND file_number != ''"
+    params = ()
+    if exclude_subcase_id is not None:
+        sql += " AND id != ?"
+        params = (int(exclude_subcase_id),)
+    return {r[0] for r in conn.execute(sql, params).fetchall()}
+
+
+def _sanitize_file_numbers(conn, rows, exclude_subcase_id=None):
+    """Null out backup file_numbers that collide with live ones.
+
+    Returns the rows (copies) with colliding file_numbers cleared; call
+    ensure_file_numbers() afterwards to back-fill them.
+    """
+    taken = _existing_file_numbers(conn, exclude_subcase_id)
+    out = []
+    for row in rows:
+        row = dict(row)
+        fn = (row.get("file_number") or "").strip()
+        if fn and fn in taken:
+            row["file_number"] = None
+        elif fn:
+            taken.add(fn)
+        out.append(row)
+    return out
+
+
+def _remap_child_rows(rows, sub_id_map):
+    """Rewrite subcase_id on invoice/settings rows; drop orphans."""
+    out = []
+    for row in rows:
+        new_sid = sub_id_map.get(row.get("subcase_id"))
+        if new_sid is None:
+            continue
+        row = dict(row)
+        row["subcase_id"] = new_sid
+        out.append(row)
+    return out
+
+
+def _check_child_rows(invs, settings):
+    for row in list(invs) + list(settings):
+        if not isinstance(row, dict) or "subcase_id" not in row:
+            raise ValueError("Backup rows are malformed.")
+
+
+def restore_main_case(payload, mode, firm_id=None, target_main_id=None):
+    """Write a main-case backup back into the database.
+
+    mode 'create' inserts a brand-new main case owned by firm_id with all
+    of the backup's subcases, invoice records, and settings (fresh ids).
+    mode 'overwrite' keeps the target main case's own details but replaces
+    its subcases, invoice records, and settings with the backup's rows.
+
+    Returns a summary dict with ids, label, and row counts.
+    """
+    mains = list(payload.get("main_cases") or [])
+    if len(mains) != 1:
+        raise ValueError("Backup must contain exactly one main case.")
+    if mode not in ("create", "overwrite"):
+        raise ValueError(f"Unknown restore mode: {mode!r}")
+    subs = [dict(r) for r in (payload.get("subcases") or [])]
+    invs = [dict(r) for r in (payload.get("invoice_records") or [])]
+    settings = [dict(r) for r in (payload.get("case_settings") or [])]
+    _check_child_rows(invs, settings)
+    label = (mains[0].get("case_name") or "").strip() or "main case"
+
+    cc = _connect_cases()
+    try:
+        if mode == "create":
+            if firm_id is None:
+                raise ValueError("Select a firm to restore into.")
+            try:
+                main_id = _insert_dict_rows(
+                    cc, "main_cases", [mains[0]],
+                    defaults={"firm_id": int(firm_id)})[0]
+            except sqlite3.IntegrityError:
+                cc.rollback()
+                raise ValueError(f"A main case named '{label}' already exists.")
+            keep_firm = int(firm_id)
+        else:
+            if target_main_id is None:
+                raise ValueError("Select a main case to overwrite.")
+            target = cc.execute(
+                "SELECT id, firm_id FROM main_cases WHERE id = ?",
+                (int(target_main_id),)).fetchone()
+            if target is None:
+                raise ValueError(f"No main case with id {target_main_id}")
+            main_id = int(target[0])
+            keep_firm = int(target[1])
+            old_sub_ids = [r[0] for r in cc.execute(
+                "SELECT id FROM subcases WHERE main_case_id = ?", (main_id,)).fetchall()]
+            if old_sub_ids:
+                cc.executemany("DELETE FROM invoice_records WHERE subcase_id = ?",
+                               [(i,) for i in old_sub_ids])
+                cc.executemany("DELETE FROM subcases WHERE id = ?",
+                               [(i,) for i in old_sub_ids])
+            sc0 = _connect_state()
+            try:
+                if old_sub_ids:
+                    sc0.executemany("DELETE FROM case_settings WHERE subcase_id = ?",
+                                    [(i,) for i in old_sub_ids])
+                sc0.commit()
+            finally:
+                sc0.close()
+
+        subs = _sanitize_file_numbers(cc, subs)
+        sub_id_map = {}
+        try:
+            for row in subs:
+                new_id = _insert_dict_rows(
+                    cc, "subcases", [row],
+                    defaults={"main_case_id": main_id, "firm_id": keep_firm})[0]
+                sub_id_map[int(row["id"])] = new_id
+        except sqlite3.IntegrityError:
+            cc.rollback()
+            raise ValueError(
+                "A subcase with the same adversary number already exists "
+                "in the target main case.")
+        mapped_invs = _remap_child_rows(invs, sub_id_map)
+        if mapped_invs:
+            _insert_dict_rows(cc, "invoice_records", mapped_invs,
+                              defaults={"firm_id": keep_firm})
+        cc.commit()
+    except Exception:
+        try:
+            cc.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        cc.close()
+
+    mapped_settings = _remap_child_rows(settings, sub_id_map)
+    sc = _connect_state()
+    try:
+        if mapped_settings:
+            _insert_dict_rows(sc, "case_settings", mapped_settings)
+        sc.commit()
+    finally:
+        sc.close()
+    ensure_file_numbers()
+
+    return {
+        "mode": mode, "scope": "main", "label": label,
+        "main_case_id": main_id,
+        "subcase_ids": [sub_id_map[int(r["id"])] for r in subs
+                        if int(r["id"]) in sub_id_map],
+        "counts": {"subcases": len(sub_id_map),
+                   "invoice_records": len(mapped_invs),
+                   "case_settings": len(mapped_settings)},
+    }
+
+
+def restore_subcase(payload, mode, firm_id=None, target_main_id=None,
+                    target_subcase_id=None):
+    """Write a single-subcase backup back into the database.
+
+    mode 'create' attaches a new subcase (with the backup's invoices and
+    settings) under target_main_id.  mode 'overwrite' keeps the target
+    subcase's identity (id, main case, firm, created_at) but replaces its
+    details, invoice records, and settings with the backup's rows.
+
+    Returns a summary dict with ids, label, and row counts.
+    """
+    subs = list(payload.get("subcases") or [])
+    if len(subs) != 1:
+        raise ValueError("Subcase backup must contain exactly one subcase.")
+    if mode not in ("create", "overwrite"):
+        raise ValueError(f"Unknown restore mode: {mode!r}")
+    sub = dict(subs[0])
+    invs = [dict(r) for r in (payload.get("invoice_records") or [])]
+    settings = [dict(r) for r in (payload.get("case_settings") or [])]
+    _check_child_rows(invs, settings)
+    label = (sub.get("transferee_name") or "").strip() or "subcase"
+
+    cc = _connect_cases()
+    try:
+        if mode == "create":
+            if target_main_id is None:
+                raise ValueError("Select a main case to attach the restored subcase to.")
+            parent = cc.execute(
+                "SELECT id, firm_id FROM main_cases WHERE id = ?",
+                (int(target_main_id),)).fetchone()
+            if parent is None:
+                raise ValueError(f"No main case with id {target_main_id}")
+            main_id = int(parent[0])
+            keep_firm = int(parent[1]) if firm_id is None else int(firm_id)
+            new_sub_id = _insert_dict_rows(
+                cc, "subcases",
+                _sanitize_file_numbers(cc, [sub]),
+                defaults={"main_case_id": main_id, "firm_id": keep_firm})[0]
+        else:
+            if target_subcase_id is None:
+                raise ValueError("Select a subcase to overwrite.")
+            target = cc.execute(
+                "SELECT id, main_case_id, firm_id FROM subcases WHERE id = ?",
+                (int(target_subcase_id),)).fetchone()
+            if target is None:
+                raise ValueError(f"No subcase with id {target_subcase_id}")
+            new_sub_id = int(target[0])
+            main_id = int(target[1])
+            keep_firm = int(target[2])
+            cc.execute("DELETE FROM invoice_records WHERE subcase_id = ?",
+                       (new_sub_id,))
+            sc0 = _connect_state()
+            try:
+                sc0.execute("DELETE FROM case_settings WHERE subcase_id = ?",
+                            (new_sub_id,))
+                sc0.commit()
+            finally:
+                sc0.close()
+            incoming_fn = (sub.get("file_number") or "").strip()
+            taken = _existing_file_numbers(cc, exclude_subcase_id=new_sub_id)
+            file_number = incoming_fn if incoming_fn and incoming_fn not in taken else None
+            try:
+                cc.execute(
+                    "UPDATE subcases SET transferee_name = ?, adversary_number = ?, "
+                    "filing_date = ?, file_number = ?, meta = ? WHERE id = ?",
+                    (sub.get("transferee_name"), sub.get("adversary_number"),
+                     sub.get("filing_date"), file_number, sub.get("meta"),
+                     new_sub_id),
+                )
+            except sqlite3.IntegrityError:
+                cc.rollback()
+                raise ValueError(
+                    "A subcase with the same adversary number already exists "
+                    "in the target main case.")
+        sub_id_map = {int(sub["id"]): new_sub_id}
+        mapped_invs = _remap_child_rows(invs, sub_id_map)
+        if mapped_invs:
+            _insert_dict_rows(cc, "invoice_records", mapped_invs,
+                              defaults={"firm_id": keep_firm})
+        cc.commit()
+    except sqlite3.IntegrityError:
+        try:
+            cc.rollback()
+        except Exception:
+            pass
+        raise ValueError(
+            "A subcase with the same adversary number already exists "
+            "in the target main case.")
+    except Exception:
+        try:
+            cc.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        cc.close()
+
+    mapped_settings = _remap_child_rows(settings, sub_id_map)
+    sc = _connect_state()
+    try:
+        if mapped_settings:
+            _insert_dict_rows(sc, "case_settings", mapped_settings)
+        sc.commit()
+    finally:
+        sc.close()
+    ensure_file_numbers()
+
+    return {
+        "mode": mode, "scope": "subcase", "label": label,
+        "main_case_id": main_id,
+        "subcase_ids": [new_sub_id],
+        "counts": {"subcases": 1,
+                   "invoice_records": len(mapped_invs),
+                   "case_settings": len(mapped_settings)},
+    }
