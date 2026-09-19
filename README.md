@@ -16,10 +16,11 @@ PAT is in early development and should not be used for real-world use at this po
 - Basic user management and administration.
 - Basic firm management and administration
 - Can export charts in PDF or Excel for use as exhibits.
+- Authorized users can back up and restore by main case or individual subcases
+
 
 **Future Features**
 - Data entry tools.
-- Data backup and restore.
 - Guest access to particular subfiles.
 - More robust multi-user support.
 - Integrations with other software.
