@@ -268,6 +268,7 @@ def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)",
 
 _ANALYSIS_VIEWS = [
     ("summary", "Case Summary", "fa-solid fa-clipboard-list"),
+    ("insights", "Case Insights", "fa-solid fa-lightbulb"),
     ("historical", "Historical Period", "fa-solid fa-clock-rotate-left"),
     ("preference", "Preference Period", "fa-solid fa-calendar-days"),
     ("new-value", "New Value", "fa-solid fa-hand-holding-dollar"),
@@ -397,6 +398,13 @@ html.Div(children=[
                 ]),
             ]),
             ]),
+    ]),
+    html.Div(id="view-insights", style={"display": "none"}, children=[
+        html.H3(children='Case Insights'),
+        html.P('Historical vs preference period comparison. Differences over 10% are '
+               'highlighted; differences of 20% or more use the danger color.',
+               className="text-muted"),
+        html.Div(id="insights-table", children=""),
     ]),
     html.Div(id="view-historical", style={"display": "none"}, children=[
             html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
@@ -2016,6 +2024,53 @@ def update_pref_stats(rowData):
     ]
 
     return _stats_table(rows)
+
+
+_INSIGHT_FLAG_STYLES = {
+    "warning": {"backgroundColor": "var(--bs-warning)", "color": "#000", "fontWeight": "600"},
+    "danger": {"backgroundColor": "var(--bs-danger)", "color": "#fff", "fontWeight": "600"},
+}
+
+
+@callback(
+    Output("insights-table", "children"),
+    Input("historical", "rowData"),
+    Input("preference", "rowData"),
+    prevent_initial_call=True,
+)
+def update_insights(hist_rows, pref_rows):
+    hist_df = pd.DataFrame(hist_rows or [])
+    pref_df = pd.DataFrame(pref_rows or [])
+    rows = analysis.build_insights(hist_df, pref_df)
+    if not rows:
+        return ""
+    body = []
+    for row in rows:
+        diff_cell = html.Td(row["diff"])
+        if row["flag"] in _INSIGHT_FLAG_STYLES:
+            diff_cell = html.Td(row["diff"], style=_INSIGHT_FLAG_STYLES[row["flag"]])
+        body.append(html.Tr([
+            html.Th(row["metric"], style={"fontWeight": "600"}),
+            html.Td(row["hist"]),
+            html.Td(row["pref"]),
+            diff_cell,
+        ]))
+    return dbc.Table(
+        [
+            html.Thead(html.Tr([
+                html.Th("Metric"),
+                html.Th("Historical Period"),
+                html.Th("Preference Period"),
+                html.Th("Difference"),
+            ])),
+            html.Tbody(body),
+        ],
+        bordered=True,
+        hover=True,
+        responsive=True,
+        className="mb-0",
+        style={"width": "100%"},
+    )
 
 @callback(
     Output("autosave-status", "children"),

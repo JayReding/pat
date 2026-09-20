@@ -234,3 +234,110 @@ def calc_net_pref_defenses(df_nv, tot_shares, ord_shares):
                 running = max(0.0, running - av)
                 applied_new_value += before - running
     return running, applied_new_value
+
+
+def pct_diff(hist_val, pref_val):
+    """Signed percent difference of pref vs hist; None when hist is zero."""
+    try:
+        hist_val = float(hist_val)
+        pref_val = float(pref_val)
+    except (TypeError, ValueError):
+        return None
+    if hist_val == 0:
+        return None
+    return (pref_val - hist_val) / abs(hist_val) * 100
+
+
+def diff_flag(diff):
+    """'danger' if |diff| >= 20, 'warning' if |diff| > 10, else None."""
+    if diff is None:
+        return None
+    ad = abs(diff)
+    if ad >= 20:
+        return "danger"
+    if ad > 10:
+        return "warning"
+    return None
+
+
+def daily_transaction_rate(df):
+    """Unique transfers per day over the Payment Date span; None if empty."""
+    if df.empty or "Transfer Number" not in df.columns or "Payment Date" not in df.columns:
+        return None
+    dates = pd.to_datetime(df["Payment Date"], errors="coerce").dropna()
+    if dates.empty:
+        return None
+    days = max((dates.max() - dates.min()).days + 1, 1)
+    n = df["Transfer Number"].nunique(dropna=True) or len(df)
+    return n / days
+
+
+def _finite(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
+def _skew_note(skew):
+    if skew is None:
+        return ""
+    if skew > 1 or skew < -1:
+        return " (Warning: Skew is outside the range of -1 to 1, indicating a non-normal distribution)"
+    return ""
+
+
+def build_insights(hist_df, pref_df):
+    """Row dicts comparing historical vs preference periods.
+
+    Each row: {metric, hist, pref, diff, flag} with display strings;
+    ``diff`` is a signed percent (or "n/a"), ``flag`` is "warning",
+    "danger", or None per the 10%/20% thresholds.
+    """
+    if hist_df.empty or pref_df.empty:
+        return []
+    rows = []
+
+    def add(metric, hist_val, pref_val, fmt):
+        h, p = _finite(hist_val), _finite(pref_val)
+        d = pct_diff(h, p) if h is not None and p is not None else None
+        rows.append({
+            "metric": metric,
+            "hist": fmt(h),
+            "pref": fmt(p),
+            "diff": f"{d:+.2f}%" if d is not None else "n/a",
+            "flag": diff_flag(d),
+        })
+
+    days = lambda v: f"{v:.2f}" if v is not None else "n/a"
+    money = lambda v: f"${v:,.2f}" if v is not None else "n/a"
+    add("Weighted Average Days Outstanding",
+        calc_weighted_dso(hist_df), calc_weighted_dso(pref_df), days)
+    add("Weighted Average Days Past Due",
+        calc_weighted_dpd(hist_df), calc_weighted_dpd(pref_df), days)
+    add("Average Number of Daily Transactions",
+        daily_transaction_rate(hist_df), daily_transaction_rate(pref_df), days)
+    add("Average Amount of Invoices",
+        hist_df["Invoice Amount"].mean(), pref_df["Invoice Amount"].mean(), money)
+    add("Average Amount of Transfers",
+        hist_df["Transfer Amount"].mean(), pref_df["Transfer Amount"].mean(), money)
+    add("Average Number of Invoices Paid per Transfer",
+        hist_df.groupby("Transfer Number").size().mean(),
+        pref_df.groupby("Transfer Number").size().mean(), days)
+    timing = lambda df: df["Invoice to Payment"] if "Invoice to Payment" in df.columns else pd.Series(dtype=float)
+    h_skew = _finite(timing(hist_df).skew())
+    p_skew = _finite(timing(pref_df).skew())
+    if (h_skew is not None and p_skew is not None
+            and abs(h_skew) < 1 and abs(p_skew) < 1):
+        add("Standard Deviation of Payment Timing",
+            timing(hist_df).std(ddof=1), timing(pref_df).std(ddof=1), days)
+
+    rows.append({
+        "metric": "Skew of Payment Timing",
+        "hist": f"{h_skew:.2f}{_skew_note(h_skew)}" if h_skew is not None else "n/a",
+        "pref": f"{p_skew:.2f}{_skew_note(p_skew)}" if p_skew is not None else "n/a",
+        "diff": "\u2014",
+        "flag": None,
+    })
+    return rows
