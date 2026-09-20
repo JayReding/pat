@@ -730,6 +730,7 @@ def _subcase_page():
                 html.H5('Subcase Details', className="mt-3"),
                 dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
                 _cm_field('Transferee Name', "sc-transferee-name"),
+                _cm_field('Case Caption', "sc-case-caption"),
                 _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
                 _cm_field('Filing Date (YYYY-MM-DD)', "sc-filing-date", "date"),
                 html.H6('Contact', className="mt-3"),
@@ -1451,8 +1452,10 @@ def _load_subcase_payload(st, subcase_id):
     info = load_case(st, subcase_id, firm_id=scope)
     store.save_app_state(subcase_id, firm_id=scope or 1)
     st = session.get_state()
+    caption = store.get_subcase(subcase_id).get("case_caption") or ""
     main_info = [
         html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+        html.Div(f"Case Caption: {caption}", style={"fontWeight": "bold", "fontSize": "1.1rem"}),
         html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
     ]
     return (
@@ -2573,6 +2576,7 @@ def cm_boot_create_mode(_):
 
 _SC_SUBCASE_FIELD_DEFS = [
     ("sc-transferee-name", "transferee_name"),
+    ("sc-case-caption", "case_caption"),
     ("sc-file-number", "file_number"),
     ("sc-filing-date", "filing_date"),
     ("sc-contact-name", "contact_name"),
@@ -2704,6 +2708,7 @@ def toggle_state_custom(contact_state, attorney_state, local_counsel_state):
     State("sc-subcase", "value"),
     State("sc-main", "value"),
     State("sc-transferee-name", "value"),
+    State("sc-case-caption", "value"),
     State("sc-file-number", "value"),
     State("sc-filing-date", "value"),
     State("sc-contact-name", "value"),
@@ -2739,7 +2744,7 @@ def toggle_state_custom(contact_state, attorney_state, local_counsel_state):
 )
 def save_sc_subcase(n,
                     subcase_id, main_id,
-                    transferee_name, file_number, filing_date,
+                    transferee_name, case_caption, file_number, filing_date,
                     contact_name, contact_address, contact_address2, contact_city, contact_state,
                     contact_state_custom, contact_zip, contact_phone, contact_email,
                     attorney_name, attorney_firm, attorney_address, attorney_address2, attorney_city,
@@ -2756,7 +2761,7 @@ def save_sc_subcase(n,
     try:
         fn = store.update_subcase_metadata(
             subcase_id,
-            transferee_name=transferee_name,
+            transferee_name=transferee_name, case_caption=case_caption,
             file_number=file_number, filing_date=filing_date,
             contact_name=contact_name, contact_address=contact_address,
             contact_address2=contact_address2, contact_city=contact_city,

@@ -60,6 +60,7 @@ def init_cases_db():
             created_at        TEXT    NOT NULL,
             meta              TEXT,
             firm_id           INTEGER NOT NULL DEFAULT 1,
+            case_caption      TEXT,
             UNIQUE(main_case_id, adversary_number)
         );
         CREATE TABLE IF NOT EXISTS invoice_records (
@@ -100,6 +101,9 @@ def init_cases_db():
         conn.execute("ALTER TABLE subcases ADD COLUMN file_number TEXT")
     if 'filing_date' not in cols:
         conn.execute("ALTER TABLE subcases ADD COLUMN filing_date TEXT")
+    if 'case_caption' not in cols:
+        conn.execute("ALTER TABLE subcases ADD COLUMN case_caption TEXT")
+    _backfill_case_captions(conn)
     mcols = {row[1] for row in conn.execute("PRAGMA table_info(main_cases)").fetchall()}
     for mcol in ("client_name", "client_contact", "client_address", "client_address2",
                  "client_city", "client_state", "client_zip", "client_phone", "client_email"):
@@ -154,11 +158,32 @@ def _display_number(adversary_number, filing_date, file_number):
     return (adversary_number or "") if filing_date else (file_number or "")
 
 
+def _make_case_caption(client_name, transferee_name):
+    """Default case caption: '<client> v. <transferee>', or just the
+    transferee name when the client name is blank."""
+    client = (client_name or "").strip()
+    transferee = (transferee_name or "").strip()
+    if not client:
+        return transferee
+    return f"{client} v. {transferee}"
+
+
+def _backfill_case_captions(conn):
+    """Fill NULL/blank case_caption rows with the default formula."""
+    rows = conn.execute(
+        "SELECT s.id, m.client_name, s.transferee_name "
+        "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
+        "WHERE s.case_caption IS NULL OR s.case_caption = ''").fetchall()
+    for sub_id, client_name, transferee_name in rows:
+        conn.execute("UPDATE subcases SET case_caption = ? WHERE id = ?",
+                     (_make_case_caption(client_name, transferee_name), int(sub_id)))
+
+
 def get_subcase(subcase_id):
     conn = _connect_cases()
     row = conn.execute(
         "SELECT s.id, s.main_case_id, s.transferee_name, s.adversary_number, s.file_number, "
-        "s.filing_date, s.meta, m.firm_id "
+        "s.filing_date, s.meta, m.firm_id, s.case_caption "
         "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
         "WHERE s.id = ?", (int(subcase_id),)
     ).fetchone()
@@ -174,6 +199,7 @@ def get_subcase(subcase_id):
         'file_number': row[4] or '',
         'filing_date': row[5] or '',
         'firm_id': row[7],
+        'case_caption': row[8] or '',
     }
     result['display_number'] = _display_number(result['adversary_number'], result['filing_date'], result['file_number'])
     for key in (_META_KEYS):
@@ -199,11 +225,16 @@ def create_subcase(main_case_id, transferee_name, firm_id=1):
     _require_firm(firm_id)
     conn = _connect_cases()
     try:
+        client_row = conn.execute(
+            "SELECT client_name FROM main_cases WHERE id = ?", (int(main_case_id),)
+        ).fetchone()
+        if client_row is None:
+            raise ValueError(f"No main case with id {main_case_id}")
         cur = conn.execute(
             "INSERT INTO subcases (main_case_id, transferee_name, adversary_number, "
-            "created_at, meta, firm_id) VALUES (?, ?, NULL, ?, ?, ?)",
+            "created_at, meta, firm_id, case_caption) VALUES (?, ?, NULL, ?, ?, ?, ?)",
             (int(main_case_id), transferee_name, datetime.now(timezone.utc).isoformat(),
-             '{}', int(firm_id)),
+              '{}', int(firm_id), _make_case_caption(client_row[0], transferee_name)),
         )
         conn.commit()
     except sqlite3.IntegrityError:
@@ -286,7 +317,7 @@ def delete_subcase(subcase_id):
 
 
 def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, transferee_name=None,
-                            **meta_fields):
+                            case_caption=None, **meta_fields):
     file_number = (file_number or '').strip()
     if not file_number:
         file_number = next_file_number()
@@ -312,11 +343,31 @@ def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, tran
         ).fetchone()
         if dup:
             raise ValueError(f"A subcase with file number '{file_number}' already exists.")
+        current = conn.execute(
+            "SELECT s.transferee_name, s.case_caption, m.client_name "
+            "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
+            "WHERE s.id = ?", (int(subcase_id),)).fetchone()
         set_parts = ["file_number = ?", "filing_date = ?", "meta = ?"]
         vals = [file_number, filing_date, json.dumps(meta_fields)]
         if transferee is not None:
             set_parts.append("transferee_name = ?")
             vals.append(transferee)
+        if current is not None:
+            old_transferee, old_caption, client_name = current
+            new_transferee = transferee if transferee is not None else (old_transferee or "")
+            old_formula = _make_case_caption(client_name, old_transferee)
+            new_formula = _make_case_caption(client_name, new_transferee)
+            caption_in = (case_caption or "").strip() if case_caption is not None else None
+            if caption_in is not None:
+                if not caption_in or caption_in == old_formula:
+                    resolved = new_formula
+                else:
+                    resolved = caption_in
+                set_parts.append("case_caption = ?")
+                vals.append(resolved)
+            elif transferee is not None and (old_caption or "") == old_formula:
+                set_parts.append("case_caption = ?")
+                vals.append(new_formula)
         vals.append(int(subcase_id))
         conn.execute(
             f"UPDATE subcases SET {', '.join(set_parts)} WHERE id = ?",
@@ -1039,6 +1090,13 @@ def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petit
         case_name, case_number, jurisdiction, judge, petition_date, **client_fields)
     conn = _connect_cases()
     try:
+        old_row = conn.execute("SELECT client_name FROM main_cases WHERE id = ?",
+                               (int(main_id),)).fetchone()
+        old_client = ((old_row[0] or "").strip()) if old_row else ""
+        new_client = (clients.get("client_name") or "").strip()
+        subs = conn.execute(
+            "SELECT id, transferee_name, case_caption FROM subcases WHERE main_case_id = ?",
+            (int(main_id),)).fetchall()
         set_parts = ["case_name=?", "case_number=?", "jurisdiction=?", "judge=?", "petition_date=?"]
         set_parts += [f"{k}=?" for k in _CLIENT_FIELDS]
         vals = [name, number, jurisdiction, judge, petition]
@@ -1046,6 +1104,12 @@ def update_main_case(main_id, case_name, case_number, jurisdiction, judge, petit
         vals.append(int(main_id))
         conn.execute(
             f"UPDATE main_cases SET {', '.join(set_parts)} WHERE id=?", vals)
+        if new_client != old_client:
+            for sub_id, transferee, caption in subs:
+                if (caption or "") == _make_case_caption(old_client, transferee):
+                    conn.execute(
+                        "UPDATE subcases SET case_caption = ? WHERE id = ?",
+                        (_make_case_caption(new_client, transferee), int(sub_id)))
         conn.commit()
     except sqlite3.IntegrityError:
         raise ValueError(f"A main case named '{name}' already exists.")
@@ -1378,6 +1442,7 @@ def restore_main_case(payload, mode, firm_id=None, target_main_id=None):
         if mapped_invs:
             _insert_dict_rows(cc, "invoice_records", mapped_invs,
                               defaults={"firm_id": keep_firm})
+        _backfill_case_captions(cc)
         cc.commit()
     except Exception:
         try:
@@ -1470,13 +1535,19 @@ def restore_subcase(payload, mode, firm_id=None, target_main_id=None,
             incoming_fn = (sub.get("file_number") or "").strip()
             taken = _existing_file_numbers(cc, exclude_subcase_id=new_sub_id)
             file_number = incoming_fn if incoming_fn and incoming_fn not in taken else None
+            parent_client = cc.execute(
+                "SELECT client_name FROM main_cases WHERE id = ?", (main_id,)).fetchone()
+            resolved_caption = ((sub.get("case_caption") or "").strip()
+                                or _make_case_caption(
+                                    parent_client[0] if parent_client else None,
+                                    sub.get("transferee_name")))
             try:
                 cc.execute(
                     "UPDATE subcases SET transferee_name = ?, adversary_number = ?, "
-                    "filing_date = ?, file_number = ?, meta = ? WHERE id = ?",
+                    "filing_date = ?, file_number = ?, meta = ?, case_caption = ? WHERE id = ?",
                     (sub.get("transferee_name"), sub.get("adversary_number"),
-                     sub.get("filing_date"), file_number, sub.get("meta"),
-                     new_sub_id),
+                      sub.get("filing_date"), file_number, sub.get("meta"),
+                      resolved_caption, new_sub_id),
                 )
             except sqlite3.IntegrityError:
                 cc.rollback()
@@ -1488,6 +1559,7 @@ def restore_subcase(payload, mode, firm_id=None, target_main_id=None,
         if mapped_invs:
             _insert_dict_rows(cc, "invoice_records", mapped_invs,
                               defaults={"firm_id": keep_firm})
+        _backfill_case_captions(cc)
         cc.commit()
     except sqlite3.IntegrityError:
         try:
