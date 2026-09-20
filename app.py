@@ -275,6 +275,11 @@ _ANALYSIS_VIEWS = [
 ]
 
 
+def _content_footer():
+    return html.Div("Preference Analysis Tool - \u00a92026 Reding Law PLLC",
+                    className="content-footer")
+
+
 def _analysis_nav_link(view, label, icon):
     return dbc.NavLink(
         [html.I(className=f"{icon} fa-fw me-3"), label],
@@ -582,6 +587,7 @@ dbc.Modal(
     keyboard=False,
 ),
             ]),
+            _content_footer(),
         ]),
     ])
 
@@ -623,23 +629,27 @@ _CM_CLIENT_FIELD_DEFS = [
 
 _SETTINGS_LINKS = [
     ("My Account", [
-        ("account", "Account Settings", "/manage/account", "fa-solid fa-user-gear", None),
-        ("firm-options", "Firm Options", "/manage/firm-options", "fa-solid fa-building", "firm-options-nav-btn"),
+        ("account", "Account Settings", "/manage/account", "fa-solid fa-user-gear", None, False),
+        ("firm-options", "Firm Options", "/manage/firm-options", "fa-solid fa-building", "firm-options-nav-btn", True),
     ]),
     ("Case Management", [
-        ("main", "Main Case Management", "/manage", "fa-solid fa-briefcase", None),
-        ("subcase", "Subcase Management", "/manage/subcases", "fa-solid fa-folder-tree", None),
-        ("backup", "Backup and Restore", "/manage/backup", "fa-solid fa-box-archive", None),
+        ("main", "Main Case Management", "/manage", "fa-solid fa-briefcase", None, False),
+        ("subcase", "Subcase Management", "/manage/subcases", "fa-solid fa-folder-tree", None, False),
+        ("backup", "Backup and Restore", "/manage/backup", "fa-solid fa-box-archive", None, False),
     ]),
     ("Administration", [
-        ("users", "User Management", "/manage/users", "fa-solid fa-users", "admin-nav-btn"),
-        ("email-settings", "Email Settings", "/manage/email-settings", "fa-solid fa-envelope", "email-settings-nav-btn"),
+        ("users", "User Management", "/manage/users", "fa-solid fa-users", "admin-nav-btn", True),
+        ("email-settings", "Email Settings", "/manage/email-settings", "fa-solid fa-envelope", "email-settings-nav-btn", True),
     ]),
 ]
 
 
-def _settings_nav_link(key, label, href, icon, nav_id, active):
+def _settings_nav_link(key, label, href, icon, nav_id, gated, active):
     kwargs = dict(id=nav_id) if nav_id else {}
+    if gated:
+        # Hidden until manage_admin_gate reveals it for authorized roles,
+        # so unauthorized users never see a flash of these links.
+        kwargs["style"] = {"display": "none"}
     return dbc.NavLink(
         [html.I(className=f"{icon} fa-fw me-3"), label],
         href=href, active=(active == key), className="analysis-nav-link", **kwargs,
@@ -651,8 +661,8 @@ def _settings_sidebar(active):
     for heading, links in _SETTINGS_LINKS:
         sections.append(html.Div(heading, className="analysis-sidebar-heading"))
         sections.append(dbc.Nav(
-            [_settings_nav_link(k, lab, href, ico, nid, active)
-             for k, lab, href, ico, nid in links],
+            [_settings_nav_link(k, lab, href, ico, nid, gated, active)
+             for k, lab, href, ico, nid, gated in links],
             vertical=True, className="navbar-nav w-100",
         ))
     sections.append(html.Div(className="mt-auto", children=[
@@ -681,6 +691,7 @@ def _settings_chrome(active, *content):
                 ]),
             ]),
             html.Div(className="analysis-body manage-console", children=list(content)),
+            _content_footer(),
         ]),
     ])
 
@@ -2056,13 +2067,13 @@ def update_user_badge(_boot, _saved):
 )
 def manage_admin_gate(_):
     u = auth.current_user
-    email_style = (
-        dash.no_update if u.role == "admin"
-        else {"display": "none"}
-    )
-    if u.role in ("admin", "firm_admin"):
-        return dash.no_update, dash.no_update, email_style
-    return {"display": "none"}, {"display": "none"}, email_style
+    show = {"display": "block"}
+    hide = {"display": "none"}
+    if u.role == "admin":
+        return show, show, show
+    if u.role == "firm_admin":
+        return show, show, hide
+    return hide, hide, hide
 
 
 def _avatar_swatches(selected_color):
