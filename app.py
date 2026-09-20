@@ -266,8 +266,55 @@ def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)",
     ])
 
 
+_ANALYSIS_VIEWS = [
+    ("summary", "Case Summary", "fa-solid fa-clipboard-list"),
+    ("historical", "Historical Period", "fa-solid fa-clock-rotate-left"),
+    ("preference", "Preference Period", "fa-solid fa-calendar-days"),
+    ("new-value", "New Value", "fa-solid fa-hand-holding-dollar"),
+    ("ocb", "Ordinary Course", "fa-solid fa-chart-line"),
+]
+
+
+def _analysis_nav_link(view, label, icon):
+    return dbc.NavLink(
+        [html.I(className=f"{icon} fa-fw me-3"), label],
+        id=f"nav-{view}",
+        active=(view == "summary"),
+        className="analysis-nav-link",
+    )
+
+
 def _analysis_page():
-    return html.Div(style={"padding": "20px"}, children=[
+    return html.Div(className="analysis-shell d-flex", children=[
+        html.Aside(className="navbar navbar-dark bg-dark analysis-sidebar", children=[
+            html.Div("Analysis", className="analysis-sidebar-heading"),
+            dbc.Nav(
+                [_analysis_nav_link(v, lab, ico) for v, lab, ico in _ANALYSIS_VIEWS],
+                vertical=True, className="navbar-nav w-100",
+            ),
+            html.Hr(className="analysis-sidebar-divider"),
+            html.Div("Management", className="analysis-sidebar-heading"),
+            dbc.Nav(
+                [dbc.NavLink(
+                    [html.I(className="fa-solid fa-gears fa-fw me-3"), "Settings"],
+                    href="/manage", className="analysis-nav-link",
+                )],
+                vertical=True, className="navbar-nav w-100",
+            ),
+        ]),
+        html.Div(className="analysis-content", children=[
+            html.Div(className="analysis-topstrip", children=[
+                html.Span(
+                    [html.I(className="fa-solid fa-chart-column me-2"), "Preference Analysis Tool"],
+                    className="fw-semibold text-white fs-4",
+                ),
+                html.Div(className="d-flex align-items-center gap-3 ms-auto", children=[
+                    html.Div(id="user-badge-strip", className="text-white-50 small"),
+                    html.Form(dbc.Button("Log out", color="light", size="sm", className="px-3"),
+                              action="/logout", method="POST"),
+                ]),
+            ]),
+            html.Div(className="analysis-body", children=[
     html.Div(style={
         "display": "flex",
         "justifyContent": "space-between",
@@ -305,9 +352,8 @@ html.Div(children=[
         ]),
         dcc.Store(id="auth-boot", data=True),
     ]),
-    html.Div(children=[
-            dcc.Tabs([
-         dcc.Tab(id="summary", label='Case Summary', children=[
+    dcc.Store(id="analysis-view", data="summary"),
+    html.Div(id="view-summary", children=[
             html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "alignItems": "flex-start"}, children=[
             html.Div(style={"flex": "1 1 0", "minWidth": "0"}, children=[
             html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "20px", "marginBottom": "20px"}, children=[
@@ -346,8 +392,8 @@ html.Div(children=[
                 ]),
             ]),
             ]),
-        ]),
-dcc.Tab(label='Historical Period', children=[
+    ]),
+    html.Div(id="view-historical", style={"display": "none"}, children=[
             html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
             html.Div(style={"flex": "1 1 0", "display": "flex", "flexDirection": "column", "gap": "12px"}, children=[
                 html.Div(style={"border": "1px solid var(--bs-border-color)",
@@ -388,8 +434,7 @@ dcc.Tab(label='Historical Period', children=[
             ),
             ])
     ]),
-
-         dcc.Tab(label='Preference Period', children=[
+    html.Div(id="view-preference", style={"display": "none"}, children=[
             html.Div(style={"display": "flex", "gap": "20px", "alignItems": "flex-start", "flexWrap": "wrap"}, children=[
             html.Div(style={"flex": "1 1 0", "display": "flex", "flexDirection": "column", "gap": "12px"}, children=[
                 html.Div(style={"border": "1px solid var(--bs-border-color)",
@@ -430,7 +475,7 @@ dcc.Tab(label='Historical Period', children=[
         ),
         ])
     ]),
-         dcc.Tab(label='New Value', children=[
+    html.Div(id="view-new-value", style={"display": "none"}, children=[
             dag.AgGrid(
                 id="new_value",
                 rowData=[],
@@ -449,8 +494,8 @@ dcc.Tab(label='Historical Period', children=[
                     {"headerName": "Exclusion Reason", "field": "Ordinary Exclusion", "editable": False}
                 ]
             ),
-        ]),
-         dcc.Tab(id="ocb", label='Ordinary Course', children=[
+    ]),
+    html.Div(id="view-ocb", style={"display": "none"}, children=[
             html.H3(children='Ordinary Course'),
             dcc.Store(id="ocb-range", data=None),
             dcc.Store(id="ocb-total-range-flag", data=False),
@@ -515,8 +560,6 @@ dcc.Tab(label='Historical Period', children=[
                     ),
                 ], width=9),
             ]),
-        ]),
-]),
     ]),
 dbc.Modal(
     [
@@ -538,7 +581,9 @@ dbc.Modal(
     backdrop="static",
     keyboard=False,
 ),
-])
+            ]),
+        ]),
+    ])
 
 
 def _cm_field(label, cid, ftype="text"):
@@ -576,11 +621,67 @@ _CM_CLIENT_FIELD_DEFS = [
 ]
 
 
-def _manage_header():
-    return html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "16px"}, children=[
-        dcc.Link("← Back to Analysis", href="/", style={"textDecoration": "none"}),
-        html.H3(children="Management Console", style={"margin": 0}),
-        html.Span(),
+_SETTINGS_LINKS = [
+    ("My Account", [
+        ("account", "Account Settings", "/manage/account", "fa-solid fa-user-gear", None),
+        ("firm-options", "Firm Options", "/manage/firm-options", "fa-solid fa-building", "firm-options-nav-btn"),
+    ]),
+    ("Case Management", [
+        ("main", "Main Case Management", "/manage", "fa-solid fa-briefcase", None),
+        ("subcase", "Subcase Management", "/manage/subcases", "fa-solid fa-folder-tree", None),
+        ("backup", "Backup and Restore", "/manage/backup", "fa-solid fa-box-archive", None),
+    ]),
+    ("Administration", [
+        ("users", "User Management", "/manage/users", "fa-solid fa-users", "admin-nav-btn"),
+        ("email-settings", "Email Settings", "/manage/email-settings", "fa-solid fa-envelope", "email-settings-nav-btn"),
+    ]),
+]
+
+
+def _settings_nav_link(key, label, href, icon, nav_id, active):
+    kwargs = dict(id=nav_id) if nav_id else {}
+    return dbc.NavLink(
+        [html.I(className=f"{icon} fa-fw me-3"), label],
+        href=href, active=(active == key), className="analysis-nav-link", **kwargs,
+    )
+
+
+def _settings_sidebar(active):
+    sections = []
+    for heading, links in _SETTINGS_LINKS:
+        sections.append(html.Div(heading, className="analysis-sidebar-heading"))
+        sections.append(dbc.Nav(
+            [_settings_nav_link(k, lab, href, ico, nid, active)
+             for k, lab, href, ico, nid in links],
+            vertical=True, className="navbar-nav w-100",
+        ))
+    sections.append(html.Div(className="mt-auto", children=[
+        html.Hr(className="analysis-sidebar-divider"),
+        dbc.Nav(
+            [dbc.NavLink(
+                [html.I(className="fa-solid fa-arrow-left fa-fw me-3"), "Back to Analysis"],
+                href="/", className="analysis-nav-link",
+            )],
+            vertical=True, className="navbar-nav w-100",
+        ),
+    ]))
+    return html.Aside(className="navbar navbar-dark bg-dark analysis-sidebar", children=sections)
+
+
+def _settings_chrome(active, *content):
+    return html.Div(className="analysis-shell d-flex", children=[
+        _settings_sidebar(active),
+        html.Div(className="analysis-content", children=[
+            html.Div(className="analysis-topstrip", children=[
+                html.Span("Settings", className="fw-semibold text-white fs-4"),
+                html.Div(className="d-flex align-items-center gap-3 ms-auto", children=[
+                    html.Div(id="user-badge-strip", className="text-white-50 small"),
+                    html.Form(dbc.Button("Log out", color="light", size="sm", className="px-3"),
+                              action="/logout", method="POST"),
+                ]),
+            ]),
+            html.Div(className="analysis-body manage-console", children=list(content)),
+        ]),
     ])
 
 
@@ -648,31 +749,9 @@ _make_firm_options("sc", "sc-main")
 _make_firm_options("users", "grant-main")
 
 
-def _manage_sidebar(active):
-    return dbc.Col(width=2, style={"borderRight": "1px solid var(--bs-border-color)", "padding": "16px"}, children=[
-        dbc.Nav([
-            html.Div("My Account", className="sidebar-heading mb-1 mt-1 px-3 text-uppercase small fw-bold text-muted"),
-            dbc.NavLink("Account Settings", href="/manage/account", active=(active == "account"), className="mb-2"),
-            dbc.NavLink("Firm Options", id="firm-options-nav-btn", href="/manage/firm-options", active=(active == "firm-options"), className="mb-2"),
-            html.Div("Case Management", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
-            dbc.NavLink("Main Case Management", href="/manage", active=(active == "main"), className="mb-2"),
-            dbc.NavLink("Subcase Management", href="/manage/subcases", active=(active == "subcase"), className="mb-2"),
-            dbc.NavLink("Backup and Restore", href="/manage/backup", active=(active == "backup"), className="mb-2"),
-            html.Div("Administration", className="sidebar-heading mb-1 mt-3 px-3 text-uppercase small fw-bold text-muted"),
-            dbc.NavLink("User Management", id="admin-nav-btn", href="/manage/users", active=(active == "users"), className="mb-2"),
-            dbc.NavLink("Email Settings", id="email-settings-nav-btn", href="/manage/email-settings", active=(active == "email-settings")),
-        ], pills=True, vertical=True),
-    ])
-
-
 def _maincase_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("main",
         dcc.Store(id="manage-boot", data=True),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("main"),
-            dbc.Col(width=10, children=[
                 html.Div(className="d-flex justify-content-between align-items-center mb-3", children=[
                     html.H3(children='Main Case Management', style={"margin": 0}),
                 ]),
@@ -709,19 +788,12 @@ def _maincase_page():
                 _cm_field('Client Email', "cm-client-email", "email"),
                 dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
                 dcc.Store(id="cm-create-mode", data=False),
-            ]),
-        ]),
-    ])
+    )
 
 
 def _subcase_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("subcase",
         dcc.Store(id="manage-boot", data=True),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("subcase"),
-            dbc.Col(width=10, children=[
                 html.H3(children='Subcase Management'),
                 _firm_picker("sc"),
                 dcc.Dropdown(id="sc-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
@@ -803,19 +875,12 @@ def _subcase_page():
                         ]),
                     ],
                 ),
-            ]),
-        ]),
-    ])
+    )
 
 
 def _backup_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("backup",
         dcc.Store(id="manage-boot", data=True),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("backup"),
-            dbc.Col(width=10, children=[
                 html.H3("Backup and Restore", className="mb-3"),
                 dbc.Card(className="mb-4", children=[
                     dbc.CardHeader(html.Span([
@@ -941,20 +1006,13 @@ def _backup_page():
                         ),
                     ]),
                 ]),
-            ]),
-        ]),
-    ])
+    )
 
 
 def _users_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("users",
         dcc.Store(id="manage-boot", data=True),
         dcc.Store(id="users-boot", data=True),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("users"),
-            dbc.Col(width=10, children=[
                 html.H3(children='User Management'),
                 html.Div(className="text-muted mb-3", id="admin-notice"),
                 _firm_picker("users"),
@@ -1018,22 +1076,15 @@ def _users_page():
                         {"field": "subcase_id", "headerName": "Subcase ID"},
                     ],
                 ),
-            ]),
-        ]),
-    ])
+    )
 
 
 def _account_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("account",
         dcc.Store(id="manage-boot", data=True),
         dcc.Store(id="account-boot", data=True),
         dcc.Store(id="account-avatar-color", data=None),
         dcc.Store(id="account-save-trigger", data=0),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("account"),
-            dbc.Col(width=10, children=[
                 html.H3(children='Account Settings'),
                 html.P('Set your display name, contact email, and avatar color. Your avatar shows your initials on a colored circle.', className="text-muted"),
                 html.Div(id="account-avatar-preview", className="mb-3"),
@@ -1043,20 +1094,13 @@ def _account_page():
                 _cm_field('Email', "account-email", "email"),
                 dbc.Button("Save Settings", id="account-save-btn", n_clicks=0, color="primary", className="mt-2"),
                 html.Div(id="account-status", className="mt-3"),
-            ]),
-        ]),
-    ])
+    )
 
 
 def _email_settings_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("email-settings",
         dcc.Store(id="manage-boot", data=True),
         dcc.Store(id="email-boot", data=True),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("email-settings"),
-            dbc.Col(width=10, children=[
                 html.H3(children='Email Settings'),
                 html.P('Configure the SMTP server the application uses to send notification emails. '
                        'These settings are system-wide.', className="text-muted"),
@@ -1090,21 +1134,14 @@ def _email_settings_page():
                     dbc.Button("Send test email", id="email-test-btn", n_clicks=0, color="secondary"),
                 ]),
                 html.Div(id="email-status", className="mt-3"),
-            ]),
-        ]),
-    ])
+    )
 
 
 def _firm_options_page():
-    return html.Div(className="manage-console", style={"padding": "20px"}, children=[
-        _manage_header(),
+    return _settings_chrome("firm-options",
         dcc.Store(id="manage-boot", data=True),
         dcc.Store(id="firm-options-boot", data=True),
         dcc.Store(id="firm-save-trigger", data=0),
-        html.Hr(),
-        dbc.Row([
-            _manage_sidebar("firm-options"),
-            dbc.Col(width=10, children=[
                 html.H3(children='Firm Options'),
                 html.P('Manage your firm settings. Changes apply only to the selected firm.', className="text-muted"),
                 html.Div(id="firm-options-firm-wrap", style={"display": "none"}, children=[
@@ -1130,8 +1167,6 @@ def _firm_options_page():
                            'This cannot be undone.', className="text-muted"),
                     dbc.Button("Delete Firm", id="firm-delete-btn", color="danger"),
                 ]),
-            ]),
-        ]),
         dbc.Modal(
             id="firm-delete-modal",
             is_open=False,
@@ -1151,12 +1186,37 @@ def _firm_options_page():
                 ]),
             ],
         ),
-    ])
+    )
+
+
+@callback(
+    Output("analysis-view", "data"),
+    [Output(f"nav-{view}", "active") for view, _, _ in _ANALYSIS_VIEWS],
+    [Output(f"view-{view}", "style") for view, _, _ in _ANALYSIS_VIEWS],
+    [Input(f"nav-{view}", "n_clicks") for view, _, _ in _ANALYSIS_VIEWS],
+    State("analysis-view", "data"),
+    prevent_initial_call=True,
+)
+def switch_analysis_view(*args):
+    current = args[-1]
+    trig = dash.callback_context.triggered_id
+    view = trig[4:] if isinstance(trig, str) and trig.startswith("nav-") else current
+    valid = {v for v, _, _ in _ANALYSIS_VIEWS}
+    if view not in valid:
+        view = "summary"
+    return (
+        view,
+        *(v == view for v, _, _ in _ANALYSIS_VIEWS),
+        *({"display": "block"} if v == view else {"display": "none"}
+          for v, _, _ in _ANALYSIS_VIEWS),
+    )
 
 
 def _shell():
     return html.Div(children=[
-        dbc.Navbar(
+        dcc.Location(id="shell-url", refresh=False),
+        html.Div(id="shell-navbar-wrap", children=[
+            dbc.Navbar(
             dbc.Container(
                 [
                     dbc.NavbarBrand(
@@ -1174,8 +1234,9 @@ def _shell():
                 fluid=True,
             ),
             color="primary", dark=True, sticky="top", className="mb-3",
-        ),
-        html.Div(style={"padding": "20px"}, children=[dash.page_container]),
+            ),
+        ]),
+        html.Div(id="shell-content", style={"padding": "20px"}, children=[dash.page_container]),
     ])
 
 
@@ -1189,6 +1250,18 @@ dash.register_page("users", path="/manage/users", layout=_users_page(), title="U
 dash.register_page("email-settings", path="/manage/email-settings", layout=_email_settings_page(), title="Email Settings", name="Email Settings")
 
 app.layout = _shell()
+
+
+@callback(
+    Output("shell-navbar-wrap", "style"),
+    Output("shell-content", "style"),
+    Input("shell-url", "pathname"),
+)
+def shell_chrome(pathname):
+    # Every Dash page (analysis + settings) renders its own sidebar and
+    # top strip; the global navbar stays mounted but hidden so its stores
+    # (shell-boot, account-saved) and user badge keep working.
+    return {"display": "none"}, {"padding": "0"}
 
 @callback(
     Output("new_value", "rowData", allow_duplicate=True),
@@ -1966,11 +2039,13 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
 
 @callback(
     Output("user-badge", "children"),
+    Output("user-badge-strip", "children"),
     Input("shell-boot", "data"),
     Input("account-saved", "data"),
 )
 def update_user_badge(_boot, _saved):
-    return _user_badge(auth.current_user)
+    badge = _user_badge(auth.current_user)
+    return badge, badge
 
 
 @callback(

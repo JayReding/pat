@@ -3,6 +3,87 @@
     height: 50px;
 }
 
+/* Analysis layout: full-height dark sidebar + content column */
+.analysis-shell {
+    min-height: 100vh;
+}
+
+.analysis-sidebar {
+    width: 290px;
+    min-width: 290px;
+    min-height: 100vh;
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 2rem 1.25rem;
+    border-radius: 0;
+}
+
+/* Zephyr gives .navbar .nav-item horizontal margins for top bars; stack them vertically here */
+.analysis-sidebar .nav-item {
+    margin: 0.45rem 0;
+}
+
+.analysis-sidebar .nav-link {
+    font-size: 1.05rem;
+    padding: 0.9rem 1.25rem;
+    border-radius: 0.5rem;
+}
+
+.analysis-sidebar-heading {
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.55);
+    padding: 0 1.25rem;
+    margin: 0 0 0.75rem;
+}
+
+.analysis-sidebar-heading:not(:first-child) {
+    margin-top: 2rem;
+}
+
+.analysis-sidebar-divider {
+    border-color: rgba(255, 255, 255, 0.2);
+    opacity: 1;
+    margin: 2rem 1.25rem 0;
+}
+
+.analysis-content {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.analysis-topstrip {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1.5rem;
+    background-color: var(--bs-primary);
+}
+
+.analysis-body {
+    padding: 20px;
+}
+
+@media (max-width: 991px) {
+    .analysis-shell {
+        flex-direction: column;
+    }
+
+    .analysis-sidebar {
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        position: static;
+        padding: 1.25rem;
+    }
+}
+
 /* Avatar color picker swatches */
 .avatar-swatch {
     width: 34px;
