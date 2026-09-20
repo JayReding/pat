@@ -277,7 +277,7 @@ _ANALYSIS_VIEWS = [
 
 
 def _content_footer():
-    return html.Div("Preference Analysis Tool - \u00a92026 Reding Law PLLC",
+    return html.Div("Preference Analysis Tool - \u00a92026 Jay Reding",
                     className="content-footer")
 
 

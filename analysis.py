@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from collections import Counter
 
 
 def trim_leading_nulls(df, column_name):
@@ -272,6 +273,88 @@ def daily_transaction_rate(df):
     return n / days
 
 
+_TERMS_MIN_COUNT = 2
+_TERMS_MIN_SHARE = 0.05
+_TERMS_DAY_GAP = 10
+
+
+def _norm_term(value):
+    value = float(value)
+    return int(value) if value.is_integer() else value
+
+
+def _cluster_terms(values, gap=_TERMS_DAY_GAP):
+    """Group implied-terms values into clusters a `gap`-day shift apart.
+
+    Consecutive values more than `gap` days apart start a new cluster, which
+    suggests an actual change in terms; smaller wiggles (weekends, holidays)
+    stay together. Returns a list of clusters (each a sorted value list).
+    """
+    clusters = []
+    for v in sorted(set(values)):
+        if clusters and v - clusters[-1][-1] <= gap:
+            clusters[-1].append(v)
+        else:
+            clusters.append([v])
+    return clusters
+
+
+def _cluster_rep(cluster):
+    mid = (cluster[(len(cluster) - 1) // 2] + cluster[len(cluster) // 2]) / 2
+    return int(round(mid))
+
+
+def terms_summary(df):
+    """Detect payment-terms changes within one period's invoices.
+
+    Two methods: distinct ``Terms Days`` values, and distinct implied terms
+    (``Invoice Due`` minus ``Invoice Date``). Implied terms within
+    ``_TERMS_DAY_GAP`` days of each other collapse into one cluster, so only
+    a shift greater than that suggests an actual change in terms. A terms
+    value only counts when seen on at least ``_TERMS_MIN_COUNT`` invoices
+    and at least ``_TERMS_MIN_SHARE`` of the invoices usable by that method,
+    so a handful of aberrant rows cannot flag the period.
+
+    Returns {changed, display}.
+    """
+    frames = []
+    if "Terms Days" in df.columns:
+        vals = pd.to_numeric(df["Terms Days"], errors="coerce").dropna()
+        frames.append([(i, _norm_term(v)) for i, v in vals.items()])
+    if {"Invoice Date", "Invoice Due"} <= set(df.columns):
+        dates = pd.to_datetime(df["Invoice Date"], errors="coerce")
+        dues = pd.to_datetime(df["Invoice Due"], errors="coerce")
+        ok = dates.notna() & dues.notna()
+        implied = (dues[ok] - dates[ok]).dt.days
+        rep_of = {}
+        for cluster in _cluster_terms(implied.tolist()):
+            rep = _cluster_rep(cluster)
+            for v in cluster:
+                rep_of[v] = rep
+        frames.append([(i, rep_of[v]) for i, v in implied.items()])
+    frames = [f for f in frames if f]
+    if not frames:
+        return {"changed": False, "display": "Insufficient data"}
+    keep_vals = set()
+    for entries in frames:
+        vals = [v for _, v in entries]
+        counts = Counter(vals)
+        total = len(vals)
+        keep_vals.update(v for v, n in counts.items()
+                         if n >= _TERMS_MIN_COUNT and n / total >= _TERMS_MIN_SHARE)
+    qualifying = sorted(keep_vals, key=float)
+    rows_with_data = {i for entries in frames for i, _ in entries}
+    rows_kept = {i for entries in frames for i, v in entries if v in keep_vals}
+    ignored = len(rows_with_data - rows_kept)
+    note = (f"; +{ignored} aberrant invoice{'s' if ignored != 1 else ''} below threshold"
+            if ignored else "")
+    if len(qualifying) > 1:
+        terms = ", ".join(f"{v:g}" for v in qualifying)
+        return {"changed": True, "display": f"Changed ({terms} days{note})"}
+    label = f"{qualifying[0]:g} days" if qualifying else "no qualifying terms observed"
+    return {"changed": False, "display": f"No change ({label}{note})"}
+
+
 def _finite(value):
     try:
         value = float(value)
@@ -316,6 +399,14 @@ def build_insights(hist_df, pref_df):
         calc_weighted_dso(hist_df), calc_weighted_dso(pref_df), days)
     add("Weighted Average Days Past Due",
         calc_weighted_dpd(hist_df), calc_weighted_dpd(pref_df), days)
+    h_terms = terms_summary(hist_df)
+    p_terms = terms_summary(pref_df)
+    if h_terms["changed"] or p_terms["changed"]:
+        terms_diff, terms_flag = "Changed", "warning"
+    else:
+        terms_diff, terms_flag = "No change", None
+    rows.append({"metric": "Changes in Terms", "hist": h_terms["display"],
+                 "pref": p_terms["display"], "diff": terms_diff, "flag": terms_flag})
     add("Average Number of Daily Transactions",
         daily_transaction_rate(hist_df), daily_transaction_rate(pref_df), days)
     add("Average Amount of Invoices",

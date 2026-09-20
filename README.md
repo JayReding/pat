@@ -5,6 +5,8 @@ This is a tool for analyzing preference claims in bankruptcy under Section 547 o
 PAT is in early development and should not be used for real-world use at this point.
 
 **Current Features**
+- Quick access to key defenses- analyze ordinary course, new value, and other defense easily and consistently.
+- Case Insights - examine key statistics comparing the historical baseline to the preference period in one view.
 - Handles creating historical baseline based on historical invoicing data.
 - Gives statatistical insights on whether a standard deviation approach may be appropriate.
 - Creates historical and preference-period weighted averages. This prevents small aberrant invoices from creating skews in the data analysis.
@@ -14,9 +16,9 @@ PAT is in early development and should not be used for real-world use at this po
 - Saves state of each case so that OCB ranges and other settings are preserved.
 - Allows for analyzing the ordinary course by DSO (days an invoice is outstanding from the invoice date) or DPD (days an invoice is past due).
 - Basic user management and administration.
-- Basic firm management and administration
+- Basic firm management and administration.
 - Can export charts in PDF or Excel for use as exhibits.
-- Authorized users can back up and restore by main case or individual subcases
+- Authorized users can back up and restore by main case or individual subcases.
 
 
 **Future Features**
@@ -48,4 +50,4 @@ Then open http://127.0.0.1:8050 in a browser.
 
 PAT is written in Python using the Dash library and should run on any platform that supports Python and Dash.
 
-&copy;2026 Reding Law PLLC 
+&copy;2026 Jay Reding
