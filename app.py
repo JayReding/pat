@@ -13,9 +13,13 @@ import pandas as pd
 import numpy as np
 from dateutil.relativedelta import relativedelta
 from plotly import graph_objects as go
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import analysis
 import backup
+import context_client
 import export_excel
 import export_pdf
 import portfolio
@@ -274,6 +278,7 @@ _ANALYSIS_VIEWS = [
     ("preference", "Preference Period", "fa-solid fa-calendar-days"),
     ("new-value", "New Value", "fa-solid fa-hand-holding-dollar"),
     ("ocb", "Ordinary Course", "fa-solid fa-chart-line"),
+    ("industry", "Industry Analysis", "fa-solid fa-industry"),
 ]
 
 
@@ -606,6 +611,31 @@ html.Div(children=[
                     ),
                 ], width=9),
             ]),
+    ]),
+    html.Div(id="view-industry", style={"display": "none"}, children=[
+        html.H3(children='Industry Analysis'),
+        html.P(
+            "Look up the 2022 NAICS industry code for this subcase's company. "
+            "The company name is sent to Context.dev for classification; "
+            "each lookup consumes API credits.",
+            className="text-muted",
+        ),
+        html.Div(id="industry-saved", className="mb-3"),
+        dcc.Store(id="industry-candidates", data=None),
+        dbc.Row([
+            dbc.Col([
+                html.Label('Company', htmlFor="industry-company"),
+                dbc.Input(id="industry-company", type="text",
+                          placeholder="Company name or domain"),
+            ], width=6),
+            dbc.Col([
+                html.Label('\u00a0', htmlFor="industry-lookup"),
+                dbc.Button("Look up NAICS", id="industry-lookup",
+                           color="primary", className="d-block"),
+            ], width=6),
+        ], className="mb-3"),
+        html.Div(id="industry-results", className="mb-3"),
+        html.Div(id="industry-save-status"),
     ]),
 dbc.Modal(
     [
@@ -1517,6 +1547,108 @@ def update_contact_panel(subcase_id):
         return html.Div("Select a subcase to view contact details.",
                         style={"color": "var(--bs-secondary-color)"})
     return _build_contact_panel(subcase_id)
+
+
+def _industry_saved_banner(subcase_id):
+    try:
+        meta = store.get_subcase_meta(subcase_id)
+    except Exception:
+        meta = {}
+    code = (meta.get("naics_code") or "").strip()
+    title = (meta.get("naics_title") or "").strip()
+    if code:
+        return dbc.Alert(
+            [html.Strong(f"NAICS {code}"), html.Span(f" — {title}" if title else "")],
+            color="success",
+        )
+    return html.Div("No NAICS code saved for this subcase yet.",
+                    style={"color": "var(--bs-secondary-color)"})
+
+
+@callback(
+    Output("industry-company", "value"),
+    Output("industry-saved", "children"),
+    Output("industry-candidates", "data"),
+    Output("industry-results", "children"),
+    Input("subcase-selector", "value"),
+    prevent_initial_call=True,
+)
+def industry_init(subcase_id):
+    if subcase_id is None:
+        return "", _industry_saved_banner(None), None, []
+    try:
+        transferee = store.get_subcase(subcase_id).get("transferee_name") or ""
+    except Exception:
+        transferee = ""
+    return transferee, _industry_saved_banner(subcase_id), None, []
+
+
+@callback(
+    Output("industry-candidates", "data", allow_duplicate=True),
+    Output("industry-results", "children"),
+    Input("industry-lookup", "n_clicks"),
+    State("industry-company", "value"),
+    State("subcase-selector", "value"),
+    prevent_initial_call=True,
+)
+def industry_lookup(n_clicks, company, subcase_id):
+    if not n_clicks:
+        raise PreventUpdate
+    if subcase_id is None:
+        return None, dbc.Alert("Select a subcase first.", color="warning")
+    try:
+        result = context_client.get_naics(company)
+    except context_client.NoApiKey as e:
+        return None, dbc.Alert(str(e), color="danger")
+    except context_client.InvalidLookup as e:
+        return None, dbc.Alert(str(e), color="warning")
+    except context_client.CompanyNotFound as e:
+        return None, dbc.Alert(str(e), color="warning")
+    except context_client.RateLimited as e:
+        return None, dbc.Alert(
+            f"Rate limited by Context.dev. Try again in {e.retry_after} seconds.",
+            color="warning")
+    except context_client.ContextDevClientError as e:
+        return None, dbc.Alert(f"NAICS lookup failed: {e}", color="danger")
+    codes = result.get("codes") or []
+    if not codes:
+        return None, dbc.Alert("No NAICS codes returned for this company.", color="warning")
+    options = [
+        {"label": f"{c['code']} — {c['name']} ({c['confidence']} confidence)",
+         "value": c["code"]}
+        for c in codes
+    ]
+    domain = result.get("domain")
+    return codes, html.Div([
+        html.P(f"Resolved to {domain}." if domain else "Candidates:",
+               className="mb-2"),
+        dcc.RadioItems(id="industry-choice", options=options, value=options[0]["value"]),
+        dbc.Button("Save selected code", id="industry-save",
+                   color="success", className="mt-2"),
+    ])
+
+
+@callback(
+    Output("industry-saved", "children", allow_duplicate=True),
+    Output("industry-save-status", "children"),
+    Input("industry-save", "n_clicks"),
+    State("industry-choice", "value"),
+    State("industry-candidates", "data"),
+    State("subcase-selector", "value"),
+    prevent_initial_call=True,
+)
+def industry_save(n_clicks, choice, candidates, subcase_id):
+    if not n_clicks:
+        raise PreventUpdate
+    if subcase_id is None:
+        raise PreventUpdate
+    match = next((c for c in (candidates or []) if c.get("code") == choice), None)
+    if match is None:
+        return dash.no_update, dbc.Alert("Select a code first.", color="warning")
+    store.set_subcase_meta("naics_code", match["code"], subcase_id)
+    store.set_subcase_meta("naics_title", match.get("name", ""), subcase_id)
+    return (_industry_saved_banner(subcase_id),
+            dbc.Alert(f"Saved NAICS {match['code']} to this subcase.", color="success"))
 
 
 @callback(
