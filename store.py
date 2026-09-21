@@ -1622,3 +1622,87 @@ def restore_subcase(payload, mode, firm_id=None, target_main_id=None,
                    "invoice_records": len(mapped_invs),
                    "case_settings": len(mapped_settings)},
     }
+
+
+_INVOICE_IMPORT_COLUMNS = (
+    "Transfer Number",
+    "Transfer Amount",
+    "Invoice Number",
+    "Invoice Amount",
+    "Check Amount",
+    "Payment Date",
+    "Invoice Date",
+    "Invoice Due",
+    "Terms Days",
+    "Days Past Due",
+    "WDPD",
+    "Invoice to Payment",
+    "WI2DEL",
+    "Age",
+    "Unpaid",
+    "Check Date",
+)
+
+
+def count_subcase_invoices(subcase_id):
+    conn = _connect_cases()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM invoice_records WHERE subcase_id = ?",
+            (int(subcase_id),)).fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row else 0
+
+
+def import_subcase_invoices(subcase_id, records, mode):
+    """Insert validated invoice records into an existing subcase.
+
+    records: list of dicts keyed by _INVOICE_IMPORT_COLUMNS (as produced by
+    data_import.validate_import_rows).  mode 'append' adds rows; mode
+    'replace' deletes the subcase's existing invoice records first.
+
+    Returns {"imported": N, "deleted": M}.  Raises ValueError for bad mode,
+    unknown subcase, or empty records.
+    """
+    if mode not in ("append", "replace"):
+        raise ValueError(f"Unknown import mode: {mode!r}")
+    records = list(records or [])
+    if not records:
+        raise ValueError("No invoice rows to import.")
+    subcase_id = int(subcase_id)
+    conn = _connect_cases()
+    try:
+        parent = conn.execute(
+            "SELECT m.firm_id FROM subcases s "
+            "JOIN main_cases m ON m.id = s.main_case_id WHERE s.id = ?",
+            (subcase_id,)).fetchone()
+        if parent is None:
+            raise ValueError(f"No subcase with id {subcase_id}")
+        firm_id = int(parent[0])
+        deleted = 0
+        if mode == "replace":
+            cur = conn.execute(
+                "DELETE FROM invoice_records WHERE subcase_id = ?",
+                (subcase_id,))
+            deleted = cur.rowcount or 0
+        cols = list(_INVOICE_IMPORT_COLUMNS)
+        quoted = ", ".join(f'"{c}"' for c in cols)
+        placeholders = ", ".join("?" for _ in cols)
+        for record in records:
+            conn.execute(
+                f"INSERT INTO invoice_records "
+                f"(subcase_id, firm_id, {quoted}) "
+                f"VALUES (?, ?, {placeholders})",
+                (subcase_id, firm_id, *[record.get(c) for c in cols]),
+            )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+    return {"imported": len(records), "deleted": deleted}

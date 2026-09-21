@@ -16,6 +16,7 @@ from plotly import graph_objects as go
 
 import analysis
 import backup
+import data_import
 import export_excel
 import export_pdf
 import portfolio
@@ -676,6 +677,7 @@ _SETTINGS_LINKS = [
     ("Case Management", [
         ("main", "Edit Main Cases", "/manage", "fa-solid fa-briefcase", None, False),
         ("subcase", "Edit Subcases", "/manage/subcases", "fa-solid fa-folder-tree", None, False),
+        ("import", "Data Import", "/manage/import", "fa-solid fa-file-import", "import-nav-btn", True),
         ("backup", "Backup and Restore", "/manage/backup", "fa-solid fa-box-archive", None, False),
     ]),
     ("Administration", [
@@ -830,6 +832,7 @@ _make_firm_init("cm")
 _make_firm_init("sc")
 _make_firm_init("users")
 _make_firm_init("bk")
+_make_firm_init("imp")
 _make_firm_options("cm", "cm-main")
 _make_firm_options("sc", "sc-main")
 _make_firm_options("users", "grant-main")
@@ -1095,6 +1098,95 @@ def _backup_page():
     )
 
 
+def _import_page():
+    return _settings_chrome("import",
+        dcc.Store(id="manage-boot", data=True),
+                html.H3("Data Import", className="mb-3"),
+                html.P("Import invoice rows from an Excel workbook formatted like the "
+                       "subcase import template into an existing subcase. "
+                       "Upload a file to preview it; nothing is written until you confirm.",
+                       className="text-muted"),
+                _firm_picker("imp"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Main Bankruptcy Case", htmlFor="imp-main",
+                               style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="imp-main", placeholder="Select a main case…"),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Subcase to import into", htmlFor="imp-subcase",
+                               style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="imp-subcase", placeholder="Select a subcase…"),
+                ]),
+                html.Div(id="imp-target-info", className="text-muted small mb-2"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Import mode", style={"fontWeight": "600"}),
+                    dbc.RadioItems(
+                        id="imp-mode",
+                        options=[
+                            {"label": "Append (keep existing rows)", "value": "append"},
+                            {"label": "Replace (delete existing rows first)", "value": "replace"},
+                        ],
+                        value="append",
+                        inline=True,
+                    ),
+                    html.Small("Replace deletes ALL existing invoice records in the "
+                               "subcase before importing. This cannot be undone.",
+                               className="text-muted d-block"),
+                ]),
+                html.Div(className="mb-3", style={"maxWidth": "640px"}, children=[
+                    dbc.Button([html.I(className="fa-solid fa-download me-2"),
+                                "Download template"],
+                               id="imp-template-btn", color="secondary", n_clicks=0),
+                    dcc.Download(id="imp-template-download"),
+                ]),
+                dcc.Upload(
+                    id="imp-upload",
+                    accept=".xlsx",
+                    multiple=False,
+                    style={
+                        "width": "100%", "borderWidth": "2px",
+                        "borderStyle": "dashed", "borderRadius": "8px",
+                        "textAlign": "center", "cursor": "pointer",
+                        "padding": "28px 16px",
+                        "backgroundColor": "var(--bs-light)",
+                    },
+                    children=html.Div([
+                        html.I(className="fa-solid fa-cloud-arrow-up fa-2x mb-2"),
+                        html.Div(dbc.Button(
+                            [html.I(className="fa-solid fa-folder-open me-2"),
+                             "Choose Excel file…"],
+                            color="primary", size="lg"),
+                            className="mb-2"),
+                        html.Div("or drag and drop a .xlsx file here",
+                                 className="text-muted"),
+                    ]),
+                ),
+                html.Div(id="imp-preview", className="mt-3"),
+                dcc.Store(id="imp-pending", data=None),
+                html.Div(id="imp-review-wrap", style={"display": "none"}, children=[
+                    html.Hr(),
+                    dbc.Button([html.I(className="fa-solid fa-upload me-2"),
+                                "Review & Import"],
+                               id="imp-review-btn", color="primary", n_clicks=0),
+                ]),
+                html.Div(id="imp-status", className="mt-3"),
+                dbc.Modal(
+                    id="imp-confirm-modal",
+                    is_open=False,
+                    centered=True,
+                    children=[
+                        dbc.ModalHeader(dbc.ModalTitle("Confirm import")),
+                        dbc.ModalBody(html.Div(id="imp-confirm-body")),
+                        dbc.ModalFooter([
+                            dbc.Button("Cancel", id="imp-confirm-cancel",
+                                       className="ms-auto", color="secondary"),
+                            dbc.Button("Import", id="imp-confirm-yes", color="danger"),
+                        ]),
+                    ],
+                ),
+    )
+
+
 def _users_page():
     return _settings_chrome("users",
         dcc.Store(id="manage-boot", data=True),
@@ -1332,6 +1424,7 @@ dash.register_page("account", path="/manage/account", layout=_account_page(), ti
 dash.register_page("firm-options", path="/manage/firm-options", layout=_firm_options_page(), title="Firm Options", name="Firm Options")
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
 dash.register_page("subcases", path="/manage/subcases", layout=_subcase_page(), title="Subcase Management", name="Subcase Management")
+dash.register_page("import", path="/manage/import", layout=_import_page(), title="Data Import", name="Data Import")
 dash.register_page("backup", path="/manage/backup", layout=_backup_page(), title="Backup and Restore", name="Backup and Restore")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
 dash.register_page("email-settings", path="/manage/email-settings", layout=_email_settings_page(), title="Email Settings", name="Email Settings")
@@ -2186,6 +2279,7 @@ def update_user_badge(_boot, _saved):
     Output("admin-nav-btn", "style"),
     Output("firm-options-nav-btn", "style"),
     Output("email-settings-nav-btn", "style"),
+    Output("import-nav-btn", "style"),
     Input("manage-boot", "data"),
 )
 def manage_admin_gate(_):
@@ -2193,10 +2287,12 @@ def manage_admin_gate(_):
     show = {"display": "block"}
     hide = {"display": "none"}
     if u.role == "admin":
-        return show, show, show
+        return show, show, show, show
     if u.role == "firm_admin":
-        return show, show, hide
-    return hide, hide, hide
+        return show, show, hide, show
+    if u.role == "case_manager":
+        return hide, hide, hide, show
+    return hide, hide, hide, hide
 
 
 @callback(
@@ -3543,6 +3639,254 @@ def bk_restore_confirm(n_clicks, pending, mode, main_target, sub_main, sub_targe
     else:
         opts = store.list_main_options(firm_id=firm)
     return status, False, None, hidden, opts
+
+
+@callback(
+    Output("imp-main", "options"),
+    Output("imp-main", "value"),
+    Input("manage-boot", "data"),
+    Input("imp-firm-select", "value"),
+    prevent_initial_call='initial_duplicate',
+)
+def imp_main_options(_, imp_firm):
+    u = auth.guard("admin", "firm_admin", "case_manager")
+    scope = int(imp_firm) if u.role == "admin" and imp_firm else auth.firm_scope(u)
+    if u.role == "case_manager":
+        opts = store.list_visible_main_options(u.id, u.role, firm_id=scope)
+    else:
+        opts = store.list_main_options(firm_id=scope)
+    return opts, None
+
+
+@callback(
+    Output("imp-subcase", "options"),
+    Output("imp-subcase", "value"),
+    Input("imp-main", "value"),
+)
+def imp_subcase_options(main_id):
+    if main_id is None:
+        return [], None
+    u = auth.guard("admin", "firm_admin", "case_manager")
+    scope = auth.firm_scope(u)
+    opts = [o for o in store.list_subcase_options(main_id, firm_id=scope)
+            if auth.can_edit_subcase(u, o["value"])]
+    return opts, opts[0]["value"] if opts else None
+
+
+@callback(
+    Output("imp-target-info", "children"),
+    Input("imp-subcase", "value"),
+)
+def imp_target_info(subcase_id):
+    if subcase_id is None:
+        return "Select a subcase to import into."
+    try:
+        sub = store.get_subcase(subcase_id)
+    except ValueError as e:
+        return str(e)
+    existing = store.count_subcase_invoices(subcase_id)
+    label = sub.get("display_number")
+    name = sub.get("transferee_name") or ""
+    who = f"{name} ({label})" if label else name
+    return f"Target: {who} — {existing} existing invoice row(s)."
+
+
+@callback(
+    Output("imp-template-download", "data"),
+    Input("imp-template-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def imp_template_download(n_clicks):
+    from io import BytesIO
+    import generate_sample_import
+    buf = BytesIO()
+    generate_sample_import.build_sample_workbook().save(buf)
+    return dcc.send_bytes(lambda b: b.write(buf.getvalue()),
+                          "subcase_import_template.xlsx")
+
+
+def _imp_preview_table(records, petition_date):
+    counts = data_import.partition_preview(records, petition_date)
+    summary = (f"{counts['total']} valid row(s): "
+               f"{counts['historical']} historical, "
+               f"{counts['preference']} preference, "
+               f"{counts['new_value']} new value")
+    if counts["outside_window"]:
+        summary += (f" ({counts['outside_window']} row(s) with Payment Date "
+                    "after the petition date — outside both periods)")
+    preview_cols = ["Transfer Number", "Transfer Amount", "Invoice Number",
+                    "Invoice Amount", "Payment Date", "Invoice Date", "Unpaid"]
+    header = html.Thead(html.Tr([html.Th(c) for c in preview_cols]))
+    body_rows = []
+    for r in records[:5]:
+        body_rows.append(html.Tr([html.Td(r.get(c)) for c in preview_cols]))
+    table = dbc.Table([header, html.Tbody(body_rows)],
+                      size="sm", striped=True, bordered=True,
+                      className="mb-0 mt-2")
+    note = ""
+    if len(records) > 5:
+        note = html.Div(f"Showing first 5 of {len(records)} rows.",
+                        className="text-muted small mt-1")
+    return html.Div([html.Div(summary), table, note])
+
+
+@callback(
+    Output("imp-pending", "data", allow_duplicate=True),
+    Output("imp-preview", "children"),
+    Output("imp-review-wrap", "style", allow_duplicate=True),
+    Output("imp-status", "children", allow_duplicate=True),
+    Input("imp-upload", "contents"),
+    State("imp-upload", "filename"),
+    State("imp-subcase", "value"),
+    State("imp-mode", "value"),
+    prevent_initial_call=True,
+)
+def imp_upload_parse(contents, filename, subcase_id, mode):
+    import base64
+    hidden = {"display": "none"}
+    shown = {"display": "block"}
+    user = auth.guard("admin", "firm_admin", "case_manager")
+    if not contents:
+        raise PreventUpdate
+    if subcase_id is None:
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Select a subcase to import into first.", color="warning")
+    if not auth.can_edit_subcase(user, int(subcase_id)):
+        return None, dash.no_update, hidden, _cm_error_alert(
+            "You do not have permission to modify that subcase.")
+    if mode not in data_import.IMPORT_MODES:
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Select an import mode first.", color="warning")
+    try:
+        _, content_string = contents.split(",", 1)
+    except ValueError:
+        content_string = contents
+    try:
+        raw_bytes = base64.b64decode(content_string)
+        _, raw_rows = data_import.parse_import_workbook(raw_bytes)
+        records, errors = data_import.validate_import_rows(raw_rows)
+    except ValueError as e:
+        return None, dash.no_update, hidden, _cm_error_alert(str(e))
+    if errors:
+        shown_errors = errors[:20]
+        extra = (f"... and {len(errors) - len(shown_errors)} more row(s). "
+                 "Fix the file and re-upload; nothing was imported."
+                 if len(errors) > len(shown_errors) else
+                 "Fix the file and re-upload; nothing was imported.")
+        return None, dash.no_update, hidden, dbc.Alert(
+            [html.Strong(f"{filename or 'File'} rejected — "
+                         f"{len(errors)} invalid row(s). "),
+             html.Ul([html.Li(e) for e in shown_errors]),
+             html.Div(extra, className="small")],
+            color="danger")
+    try:
+        sub = store.get_subcase(subcase_id)
+        petition = store.get_main_by_id(sub["main_case_id"])["petition_date"]
+    except ValueError as e:
+        return None, dash.no_update, hidden, _cm_error_alert(str(e))
+    pending = {"subcase_id": int(subcase_id), "mode": mode, "records": records,
+               "filename": filename or "upload.xlsx"}
+    preview = dbc.Alert(
+        [html.Strong(f"Loaded {filename}. "),
+         _imp_preview_table(records, petition)],
+        color="success")
+    return pending, preview, shown, dash.no_update
+
+
+def _imp_plan(pending):
+    """Validate a pending import against the current user.
+
+    Returns (plan, error_alert) mirroring _bk_restore_plan.
+    """
+    user = auth.guard("admin", "firm_admin", "case_manager")
+    if not pending or not pending.get("records") or not pending.get("subcase_id"):
+        return None, dbc.Alert("Upload a valid Excel file first.", color="warning")
+    if pending.get("mode") not in data_import.IMPORT_MODES:
+        return None, dbc.Alert("Select an import mode first.", color="warning")
+    try:
+        sub = store.get_subcase(pending["subcase_id"])
+    except ValueError as e:
+        return None, _cm_error_alert(str(e))
+    scope = auth.firm_scope(user)
+    if scope is not None and int(sub["firm_id"]) != int(scope):
+        return None, _cm_error_alert("That subcase is outside your firm.")
+    if not auth.can_edit_subcase(user, int(pending["subcase_id"])):
+        return None, _cm_error_alert(
+            "You do not have permission to modify that subcase.")
+    existing = store.count_subcase_invoices(pending["subcase_id"])
+    label = sub.get("display_number")
+    name = sub.get("transferee_name") or "subcase"
+    who = f"{name} ({label})" if label else name
+    n = len(pending["records"])
+    if pending["mode"] == "replace":
+        detail = (f"This will delete ALL {existing} existing invoice row(s) in "
+                  f"subcase '{who}' and import {n} row(s) from "
+                  f"'{pending.get('filename')}'.")
+    else:
+        detail = (f"This will append {n} invoice row(s) from "
+                  f"'{pending.get('filename')}' to subcase '{who}' "
+                  f"(which has {existing} existing row(s)).")
+    return {"subcase_id": int(pending["subcase_id"]), "mode": pending["mode"],
+            "label": who, "detail": detail,
+            "records": pending["records"]}, None
+
+
+@callback(
+    Output("imp-status", "children", allow_duplicate=True),
+    Output("imp-confirm-modal", "is_open", allow_duplicate=True),
+    Output("imp-confirm-body", "children"),
+    Input("imp-review-btn", "n_clicks"),
+    State("imp-pending", "data"),
+    prevent_initial_call=True,
+)
+def imp_review_arm(n_clicks, pending):
+    plan, error = _imp_plan(pending)
+    if error is not None:
+        return error, False, dash.no_update
+    body = [html.P(plan["detail"]),
+            html.P("This action cannot be undone.", className="text-muted")]
+    return dash.no_update, True, body
+
+
+@callback(
+    Output("imp-confirm-modal", "is_open", allow_duplicate=True),
+    Input("imp-confirm-cancel", "n_clicks"),
+    prevent_initial_call=True,
+)
+def imp_confirm_cancel(_):
+    return False
+
+
+@callback(
+    Output("imp-status", "children", allow_duplicate=True),
+    Output("imp-confirm-modal", "is_open", allow_duplicate=True),
+    Output("imp-pending", "data", allow_duplicate=True),
+    Output("imp-review-wrap", "style", allow_duplicate=True),
+    Output("imp-target-info", "children", allow_duplicate=True),
+    Input("imp-confirm-yes", "n_clicks"),
+    State("imp-pending", "data"),
+    prevent_initial_call=True,
+)
+def imp_confirm_import(n_clicks, pending):
+    hidden = {"display": "none"}
+    plan, error = _imp_plan(pending)
+    if error is not None:
+        return error, False, dash.no_update, dash.no_update, dash.no_update
+    try:
+        result = store.import_subcase_invoices(
+            plan["subcase_id"], plan["records"], plan["mode"])
+    except ValueError as e:
+        return _cm_error_alert(str(e)), False, dash.no_update, dash.no_update, dash.no_update
+    if plan["mode"] == "replace":
+        msg = (f"Imported {result['imported']} invoice row(s) into "
+               f"'{plan['label']}' (replaced {result['deleted']} existing row(s)).")
+    else:
+        msg = (f"Appended {result['imported']} invoice row(s) to "
+               f"'{plan['label']}'.")
+    status = dbc.Alert(msg, color="success")
+    existing = store.count_subcase_invoices(plan["subcase_id"])
+    info = f"Target: {plan['label']} — {existing} invoice row(s)."
+    return status, False, None, hidden, info
 
 
 @callback(
