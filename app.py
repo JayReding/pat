@@ -18,6 +18,7 @@ import analysis
 import backup
 import export_excel
 import export_pdf
+import portfolio
 import store
 import auth
 import session
@@ -247,7 +248,7 @@ session.set_loader(_session_loader)
 
 # Initialize the app
 app = Dash(use_pages=True, pages_folder="", external_stylesheets=[dbc.themes.ZEPHYR, dbc.icons.FONT_AWESOME])
-app.title = "Preference Analysis Tool"
+app.title = "Preference Analysis Tool (PAT)"
 
 
 def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)",
@@ -277,7 +278,7 @@ _ANALYSIS_VIEWS = [
 
 
 def _content_footer():
-    return html.Div("Preference Analysis Tool - \u00a92026 Jay Reding",
+    return html.Div("Preference Analysis Tool (PAT) - \u00a92026 Jay Reding",
                     className="content-footer")
 
 
@@ -290,28 +291,59 @@ def _analysis_nav_link(view, label, icon):
     )
 
 
+def _main_sidebar(active):
+    """Shared main sidebar for the analysis (/) and portfolio views.
+
+    ``active == "analysis"`` renders the in-page view-switcher links;
+    ``active == "portfolio"`` renders the identical sidebar but the analysis
+    links become plain navigation back to the analysis page.
+    """
+    if active == "analysis":
+        analysis_links = [_analysis_nav_link(v, lab, ico) for v, lab, ico in _ANALYSIS_VIEWS]
+    else:
+        analysis_links = [
+            dbc.NavLink(
+                [html.I(className=f"{ico} fa-fw me-3"), lab],
+                href="/", className="analysis-nav-link",
+            )
+            for _, lab, ico in _ANALYSIS_VIEWS
+        ]
+    if active == "portfolio":
+        portfolio_link = dbc.NavLink(
+            [html.I(className="fa-solid fa-briefcase fa-fw me-3"), "Portfolio View"],
+            href="/portfolio", className="analysis-nav-link", active=True,
+        )
+    else:
+        portfolio_link = dbc.NavLink(
+            [html.I(className="fa-solid fa-briefcase fa-fw me-3"), "Portfolio View"],
+            href="/portfolio", className="analysis-nav-link",
+            id="portfolio-nav-btn", style={"display": "none"},
+        )
+    return html.Aside(className="navbar navbar-dark bg-dark analysis-sidebar", children=[
+        html.Div("Analysis", className="analysis-sidebar-heading"),
+        dbc.Nav(analysis_links, vertical=True, className="navbar-nav w-100"),
+        html.Hr(className="analysis-sidebar-divider"),
+        html.Div("Portfolio", className="analysis-sidebar-heading"),
+        dbc.Nav([portfolio_link], vertical=True, className="navbar-nav w-100"),
+        html.Hr(className="analysis-sidebar-divider"),
+        html.Div("Management", className="analysis-sidebar-heading"),
+        dbc.Nav(
+            [dbc.NavLink(
+                [html.I(className="fa-solid fa-gears fa-fw me-3"), "Settings"],
+                href="/manage", className="analysis-nav-link",
+            )],
+            vertical=True, className="navbar-nav w-100",
+        ),
+    ])
+
+
 def _analysis_page():
     return html.Div(className="analysis-shell d-flex", children=[
-        html.Aside(className="navbar navbar-dark bg-dark analysis-sidebar", children=[
-            html.Div("Analysis", className="analysis-sidebar-heading"),
-            dbc.Nav(
-                [_analysis_nav_link(v, lab, ico) for v, lab, ico in _ANALYSIS_VIEWS],
-                vertical=True, className="navbar-nav w-100",
-            ),
-            html.Hr(className="analysis-sidebar-divider"),
-            html.Div("Management", className="analysis-sidebar-heading"),
-            dbc.Nav(
-                [dbc.NavLink(
-                    [html.I(className="fa-solid fa-gears fa-fw me-3"), "Settings"],
-                    href="/manage", className="analysis-nav-link",
-                )],
-                vertical=True, className="navbar-nav w-100",
-            ),
-        ]),
+        _main_sidebar("analysis"),
         html.Div(className="analysis-content", children=[
             html.Div(className="analysis-topstrip", children=[
                 html.Span(
-                    [html.I(className="fa-solid fa-chart-column me-2"), "Preference Analysis Tool"],
+                    [html.I(className="fa-solid fa-chart-column me-2"), "Preference Analysis Tool (PAT)"],
                     className="fw-semibold text-white fs-4",
                 ),
                 html.Div(className="d-flex align-items-center gap-3 ms-auto", children=[
@@ -357,6 +389,7 @@ html.Div(children=[
             ]),
         ]),
         dcc.Store(id="auth-boot", data=True),
+        dcc.Store(id="analysis-boot", data=True),
     ]),
     dcc.Store(id="analysis-view", data="summary"),
     html.Div(id="view-summary", children=[
@@ -576,7 +609,7 @@ html.Div(children=[
     ]),
 dbc.Modal(
     [
-        dbc.ModalHeader(dbc.ModalTitle("Welcome to the Preference Analysis Tool")),
+        dbc.ModalHeader(dbc.ModalTitle("Welcome to the Preference Analysis Tool (PAT)")),
         dbc.ModalBody([
             html.P("This appears to be the first time you are running the Preference Analysis Tool, or the case database is empty. In order to start using the Preference Analysis Tool you need to create a new main bankruptcy case. Once you have created a new case, you can begin importing your data into potential or filed preference cases."),
             html.P("If you are seeing this message in error, contact your administrator or technical support."),
@@ -641,8 +674,8 @@ _SETTINGS_LINKS = [
         ("firm-options", "Firm Options", "/manage/firm-options", "fa-solid fa-building", "firm-options-nav-btn", True),
     ]),
     ("Case Management", [
-        ("main", "Main Case Management", "/manage", "fa-solid fa-briefcase", None, False),
-        ("subcase", "Subcase Management", "/manage/subcases", "fa-solid fa-folder-tree", None, False),
+        ("main", "Edit Main Cases", "/manage", "fa-solid fa-briefcase", None, False),
+        ("subcase", "Edit Subcases", "/manage/subcases", "fa-solid fa-folder-tree", None, False),
         ("backup", "Backup and Restore", "/manage/backup", "fa-solid fa-box-archive", None, False),
     ]),
     ("Administration", [
@@ -699,6 +732,40 @@ def _settings_chrome(active, *content):
                 ]),
             ]),
             html.Div(className="analysis-body manage-console", children=list(content)),
+            _content_footer(),
+        ]),
+    ])
+
+
+def _portfolio_page():
+    return html.Div(className="analysis-shell d-flex", children=[
+        _main_sidebar("portfolio"),
+        html.Div(className="analysis-content", children=[
+            html.Div(className="analysis-topstrip", children=[
+                html.Span(
+                    [html.I(className="fa-solid fa-chart-column me-2"), "Preference Analysis Tool (PAT)"],
+                    className="fw-semibold text-white fs-4",
+                ),
+                html.Div(className="d-flex align-items-center gap-3 ms-auto", children=[
+                    html.Div(id="user-badge-strip", className="text-white-50 small"),
+                    html.Form(dbc.Button("Log out", color="light", size="sm", className="px-3"),
+                              action="/logout", method="POST"),
+                ]),
+            ]),
+            html.Div(className="analysis-body manage-console", children=[
+                dcc.Store(id="portfolio-boot", data=True),
+                html.H3("Portfolio View", style={"margin": 0}),
+                html.Div(className="text-muted", style={"marginBottom": "8px"}, children=[
+                    "Choose a main bankruptcy case to see the preference outlook across its subcases.",
+                ]),
+                html.Div(style={"maxWidth": "640px", "marginBottom": "16px"}, children=[
+                    html.Label("Main Bankruptcy Case", htmlFor="portfolio-main-select", style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="portfolio-main-select", options=[], value=None, clearable=False),
+                ]),
+                html.Div(id="portfolio-feedback", className="text-muted small mb-2"),
+                html.Div(id="portfolio-summary-header", children=[]),
+                html.Div(id="portfolio-table", style={"marginTop": "16px"}, children=[]),
+            ]),
             _content_footer(),
         ]),
     ])
@@ -1260,6 +1327,7 @@ def _shell():
 
 
 dash.register_page("analysis", path="/", layout=_analysis_page(), title="Preference Analysis Tool", name="Analysis")
+dash.register_page("portfolio", path="/portfolio", layout=_portfolio_page(), title="Portfolio View", name="Portfolio View")
 dash.register_page("account", path="/manage/account", layout=_account_page(), title="Account Settings", name="Account Settings")
 dash.register_page("firm-options", path="/manage/firm-options", layout=_firm_options_page(), title="Firm Options", name="Firm Options")
 dash.register_page("maincase", path="/manage", layout=_maincase_page(), title="Main Case Management", name="Main Case Management")
@@ -2129,6 +2197,92 @@ def manage_admin_gate(_):
     if u.role == "firm_admin":
         return show, show, hide
     return hide, hide, hide
+
+
+@callback(
+    Output("portfolio-nav-btn", "style"),
+    Input("analysis-boot", "data"),
+)
+def analysis_portfolio_gate(_):
+    # Portfolio is for case managers and above.
+    if auth.current_user.role == "user":
+        return {"display": "none"}
+    return {"display": "block"}
+
+
+def _portfolio_stat(label, value, icon):
+    return html.Div(style={
+        "flex": "1 1 0", "minWidth": "180px", "padding": "14px 18px",
+        "borderRadius": "0.375rem", "border": "1px solid var(--bs-border-color)",
+        "backgroundColor": "var(--bs-tertiary-bg)",
+    }, children=[
+        html.I(className=f"{icon} me-2", style={"opacity": ".8"}),
+        html.Span(label, className="text-muted"),
+        html.Div(value, style={"fontSize": "1.35rem", "fontWeight": "700"}),
+    ])
+
+
+@callback(
+    Output("portfolio-main-select", "options"),
+    Output("portfolio-main-select", "value"),
+    Input("portfolio-boot", "data"),
+)
+def portfolio_boot(_):
+    u = auth.guard("admin", "firm_admin", "case_manager")
+    opts = store.list_visible_main_options(u.id, u.role, firm_id=auth.firm_scope(u))
+    value = opts[0]["value"] if opts else None
+    return opts, value
+
+
+@callback(
+    Output("portfolio-feedback", "children"),
+    Output("portfolio-summary-header", "children"),
+    Output("portfolio-table", "children"),
+    Input("portfolio-main-select", "value"),
+)
+def portfolio_load(main_id):
+    u = auth.guard("admin", "firm_admin", "case_manager")
+    scope = auth.firm_scope(u)
+    allowed = {int(o["value"]) for o in store.list_visible_main_options(u.id, u.role, firm_id=scope)}
+    if main_id is None:
+        return "Select a main bankruptcy case to view its portfolio.", [], []
+    if int(main_id) not in allowed:
+        return "You do not have rights to view this case.", [], []
+    rows = portfolio.main_case_rollup(int(main_id), firm_id=scope)
+    if not rows:
+        return "This main case has no subcases yet.", [], []
+    total_transfers = sum(r["total_transfers"] for r in rows)
+    total_net = sum(r["net_preference"] for r in rows)
+    recoverable = (total_net / total_transfers * 100) if total_transfers else None
+    header = html.Div(style={"display": "flex", "flexWrap": "wrap", "gap": "16px"}, children=[
+        _portfolio_stat("Total Transfers (all subcases)",
+                        f"${total_transfers:,.2f}", "fa-solid fa-money-bill-transfer"),
+        _portfolio_stat("Total Net Preference",
+                        f"${total_net:,.2f}", "fa-solid fa-dollar-sign"),
+        _portfolio_stat("Estimated % of Transfers Recoverable",
+                        f"{recoverable:.1f}%" if recoverable is not None else "\u2014",
+                        "fa-solid fa-percent"),
+        _portfolio_stat("Subcases", str(len(rows)), "fa-solid fa-folder-open"),
+    ])
+    body = [
+        html.Tr([html.Td(r["case_name"]),
+                 html.Td(f"${r['total_transfers']:,.2f}", className="text-end"),
+                 html.Td(f"${r['total_new_value']:,.2f}", className="text-end"),
+                 html.Td(f"${r['ordinary_course']:,.2f}", className="text-end"),
+                 html.Td(f"${r['net_preference']:,.2f}", className="text-end")])
+        for r in rows
+    ]
+    table = html.Table(className="table table-striped table-hover", children=[
+        html.Thead(html.Tr([
+            html.Th("Case Name"),
+            html.Th("Total Transfers", className="text-end"),
+            html.Th("Total New Value", className="text-end"),
+            html.Th("Total Ordinary Course", className="text-end"),
+            html.Th("Total Net Preference", className="text-end"),
+        ])),
+        html.Tbody(body),
+    ])
+    return "", header, table
 
 
 def _avatar_swatches(selected_color):

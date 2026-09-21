@@ -1,4 +1,4 @@
-# The Preference Analysis Tool
+# The Preference Analysis Tool (PAT)
 
 This is a tool for analyzing preference claims in bankruptcy under Section 547 of the Bankruptcy Code. It analyzes common defenses such as the ordinary course of business defense and the new value defense.
 

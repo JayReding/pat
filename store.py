@@ -551,6 +551,32 @@ def list_main_options(firm_id=None):
     return [{"label": f"{name} (#{number})", "value": mid} for mid, name, number in rows]
 
 
+def list_visible_main_options(user_id, role, firm_id=None):
+    """Main cases a user has rights to view.
+
+    admin -> all main cases; firm_admin -> the firm's main cases; anything
+    else (case_manager) -> main cases granted directly or via a subcase
+    grant, scoped to the firm.
+    """
+    if role == 'admin':
+        return list_main_options(None)
+    if role == 'firm_admin':
+        return list_main_options(firm_id)
+    main_ids = {int(g['main_case_id']) for g in main_grants_for(user_id)}
+    sub_ids = [int(s['subcase_id']) for s in subcase_grants_for(user_id)]
+    if sub_ids:
+        conn = _connect_cases()
+        marks = ','.join('?' for _ in sub_ids)
+        rows = conn.execute(
+            f'SELECT DISTINCT main_case_id FROM subcases WHERE id IN ({marks})',
+            tuple(sub_ids),
+        ).fetchall()
+        conn.close()
+        main_ids |= {int(r[0]) for r in rows}
+    source = list_main_options(None) if firm_id is None else list_main_options(firm_id)
+    return [o for o in source if int(o['value']) in main_ids]
+
+
 def list_subcase_options(main_id=None, firm_id=None):
     conn = _connect_cases()
     sql = '''
