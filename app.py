@@ -21,6 +21,7 @@ import export_excel
 import export_pdf
 import portfolio
 import store
+import test_data
 import auth
 import session
 import mailer as smtp_mail
@@ -683,6 +684,7 @@ _SETTINGS_LINKS = [
     ("Administration", [
         ("users", "User Management", "/manage/users", "fa-solid fa-users", "admin-nav-btn", True),
         ("email-settings", "Email Settings", "/manage/email-settings", "fa-solid fa-envelope", "email-settings-nav-btn", True),
+        ("test-data", "Test Data Generator", "/manage/test-data", "fa-solid fa-flask", "test-data-nav-btn", True),
     ]),
 ]
 
@@ -833,9 +835,11 @@ _make_firm_init("sc")
 _make_firm_init("users")
 _make_firm_init("bk")
 _make_firm_init("imp")
+_make_firm_init("td")
 _make_firm_options("cm", "cm-main")
 _make_firm_options("sc", "sc-main")
 _make_firm_options("users", "grant-main")
+_make_firm_options("td", "td-main")
 
 
 def _maincase_page():
@@ -1187,6 +1191,117 @@ def _import_page():
     )
 
 
+def _test_data_page():
+    return _settings_chrome("test-data",
+        dcc.Store(id="manage-boot", data=True),
+                html.H3("Test Data Generator", className="mb-3"),
+                html.P("Generate semi-random invoice data for a subcase to model "
+                       "ordinary-course, late-payment, and early-payment scenarios. "
+                       "Covers ~18 months of historical data plus the 90-day preference "
+                       "period ending on the main case's petition date. "
+                       "Nothing is written until you confirm.",
+                        className="text-muted"),
+                _firm_picker("td"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Main Bankruptcy Case", htmlFor="td-main",
+                               style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="td-main", placeholder="Select a main case…"),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Subcase to generate into", htmlFor="td-subcase",
+                               style={"fontWeight": "600"}),
+                    dcc.Dropdown(id="td-subcase", placeholder="Select a subcase…"),
+                ]),
+                html.Div(id="td-target-info", className="text-muted small mb-2"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Scenario", htmlFor="td-scenario",
+                               style={"fontWeight": "600"}),
+                    dcc.Dropdown(
+                        id="td-scenario",
+                        options=[
+                            {"label": "Ordinary Course — preference and historical periods substantially similar",
+                             "value": "ordinary"},
+                            {"label": "Late Payment — invoices paid later in the preference period",
+                             "value": "late"},
+                            {"label": "Early Payment — invoices paid earlier in the preference period",
+                             "value": "early"},
+                        ],
+                        value="ordinary",
+                        clearable=False,
+                    ),
+                    html.Small("Net-30 baseline: ordinary ~32d DSO in both periods; "
+                               "late shifts preference to ~50d; early shifts preference to ~20d.",
+                               className="text-muted d-block"),
+                ]),
+                html.Div(className="d-flex gap-3 flex-wrap", style={"maxWidth": "640px"}, children=[
+                    html.Div(className="mb-2", style={"flex": "1 1 150px"}, children=[
+                        html.Label("Paid invoices (total)", htmlFor="td-total",
+                                   style={"fontWeight": "600"}),
+                        dbc.Input(id="td-total", type="number", min=2, max=2000,
+                                  value=200, step=1),
+                        html.Small("Split time-proportionally across ~21 months.",
+                                   className="text-muted d-block"),
+                    ]),
+                    html.Div(className="mb-2", style={"flex": "1 1 150px"}, children=[
+                        html.Label("Unpaid (new value)", htmlFor="td-unpaid",
+                                   style={"fontWeight": "600"}),
+                        dbc.Input(id="td-unpaid", type="number", min=0, max=100,
+                                  value=6, step=1),
+                        html.Small("Extra rows in the preference period.",
+                                   className="text-muted d-block"),
+                    ]),
+                    html.Div(className="mb-2", style={"flex": "1 1 150px"}, children=[
+                        html.Label("Random seed (optional)", htmlFor="td-seed",
+                                   style={"fontWeight": "600"}),
+                        dbc.Input(id="td-seed", type="text",
+                                  placeholder="Blank = random"),
+                    ]),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("Write mode", style={"fontWeight": "600"}),
+                    dbc.RadioItems(
+                        id="td-mode",
+                        options=[
+                            {"label": "Append (keep existing rows)", "value": "append"},
+                            {"label": "Replace (delete existing rows first)", "value": "replace"},
+                        ],
+                        value="append",
+                        inline=True,
+                    ),
+                    html.Small("Replace deletes ALL existing invoice records in the "
+                               "subcase before generating. This cannot be undone.",
+                               className="text-muted d-block"),
+                ]),
+                dbc.Button([html.I(className="fa-solid fa-flask me-2"),
+                            "Generate Preview"],
+                           id="td-generate-btn", color="primary", n_clicks=0,
+                           className="mb-2"),
+                html.Div(id="td-preview", className="mt-3"),
+                dcc.Store(id="td-pending", data=None),
+                html.Div(id="td-review-wrap", style={"display": "none"}, children=[
+                    html.Hr(),
+                    dbc.Button([html.I(className="fa-solid fa-upload me-2"),
+                                "Review & Generate"],
+                               id="td-review-btn", color="primary", n_clicks=0),
+                ]),
+                html.Div(id="td-status", className="mt-3"),
+                dbc.Modal(
+                    id="td-confirm-modal",
+                    is_open=False,
+                    centered=True,
+                    children=[
+                        dbc.ModalHeader(dbc.ModalTitle("Confirm test data generation")),
+                        dbc.ModalBody(html.Div(id="td-confirm-body")),
+                        dbc.ModalFooter([
+                            dbc.Button("Cancel", id="td-confirm-cancel",
+                                       className="ms-auto", color="secondary"),
+                            dbc.Button("Generate", id="td-confirm-yes", color="danger"),
+                        ]),
+                    ],
+                ),
+    )
+
+
 def _users_page():
     return _settings_chrome("users",
         dcc.Store(id="manage-boot", data=True),
@@ -1428,6 +1543,7 @@ dash.register_page("import", path="/manage/import", layout=_import_page(), title
 dash.register_page("backup", path="/manage/backup", layout=_backup_page(), title="Backup and Restore", name="Backup and Restore")
 dash.register_page("users", path="/manage/users", layout=_users_page(), title="User Management", name="User Management")
 dash.register_page("email-settings", path="/manage/email-settings", layout=_email_settings_page(), title="Email Settings", name="Email Settings")
+dash.register_page("test-data", path="/manage/test-data", layout=_test_data_page(), title="Test Data Generator", name="Test Data Generator")
 
 app.layout = _shell()
 
@@ -2280,6 +2396,7 @@ def update_user_badge(_boot, _saved):
     Output("firm-options-nav-btn", "style"),
     Output("email-settings-nav-btn", "style"),
     Output("import-nav-btn", "style"),
+    Output("test-data-nav-btn", "style"),
     Input("manage-boot", "data"),
 )
 def manage_admin_gate(_):
@@ -2287,12 +2404,12 @@ def manage_admin_gate(_):
     show = {"display": "block"}
     hide = {"display": "none"}
     if u.role == "admin":
-        return show, show, show, show
+        return show, show, show, show, show
     if u.role == "firm_admin":
-        return show, show, hide, show
+        return show, show, hide, show, hide
     if u.role == "case_manager":
-        return hide, hide, hide, show
-    return hide, hide, hide, hide
+        return hide, hide, hide, show, hide
+    return hide, hide, hide, hide, hide
 
 
 @callback(
@@ -3884,6 +4001,228 @@ def imp_confirm_import(n_clicks, pending):
         msg = (f"Appended {result['imported']} invoice row(s) to "
                f"'{plan['label']}'.")
     status = dbc.Alert(msg, color="success")
+    existing = store.count_subcase_invoices(plan["subcase_id"])
+    info = f"Target: {plan['label']} — {existing} invoice row(s)."
+    return status, False, None, hidden, info
+
+
+@callback(
+    Output("td-subcase", "options"),
+    Output("td-subcase", "value"),
+    Input("td-main", "value"),
+)
+def td_subcase_options(main_id):
+    auth.guard("admin")
+    if main_id is None:
+        return [], None
+    opts = store.list_subcase_options(main_id)
+    return opts, opts[0]["value"] if opts else None
+
+
+@callback(
+    Output("td-target-info", "children"),
+    Input("td-subcase", "value"),
+    Input("td-main", "value"),
+)
+def td_target_info(subcase_id, main_id):
+    auth.guard("admin")
+    if subcase_id is None:
+        return "Select a subcase to generate into."
+    try:
+        sub = store.get_subcase(subcase_id)
+        petition = store.get_main_by_id(sub["main_case_id"])["petition_date"]
+        hist_start, pref_start, petition_d = test_data.scenario_windows(petition)
+    except ValueError as e:
+        return str(e)
+    existing = store.count_subcase_invoices(subcase_id)
+    label = sub.get("display_number")
+    name = sub.get("transferee_name") or ""
+    who = f"{name} ({label})" if label else name
+    return (f"Target: {who} — {existing} existing invoice row(s). "
+            f"Historical {hist_start.isoformat()} to {pref_start.isoformat()}, "
+            f"preference {pref_start.isoformat()} to {petition_d.isoformat()}.")
+
+
+def _td_preview_table(records, petition_date):
+    counts = test_data.summarize(records, petition_date)
+    summary = (f"{counts['total']} generated row(s): "
+               f"{counts['historical']} historical, "
+               f"{counts['preference']} preference, "
+               f"{counts['new_value']} new value")
+    paid = [r for r in records if not r.get("Unpaid")]
+    # Compute mean DSO per window from the records directly.
+    try:
+        hist_start, pref_start, _ = test_data.scenario_windows(petition_date)
+        pref_start_s = pref_start.isoformat()
+        hist_vals = [r["Invoice to Payment"] for r in paid if r["Payment Date"] < pref_start_s]
+        pref_vals = [r["Invoice to Payment"] for r in paid if r["Payment Date"] >= pref_start_s]
+        dso_line = (f"Mean DSO — historical: {sum(hist_vals)/len(hist_vals):.1f}d "
+                    f"vs preference: {sum(pref_vals)/len(pref_vals):.1f}d."
+                    if hist_vals and pref_vals else "")
+    except Exception:
+        dso_line = ""
+    preview_cols = ["Transfer Number", "Transfer Amount", "Invoice Number",
+                    "Invoice Amount", "Payment Date", "Invoice Date", "Unpaid"]
+    header = html.Thead(html.Tr([html.Th(c) for c in preview_cols]))
+    body_rows = []
+    for r in records[:5]:
+        body_rows.append(html.Tr([html.Td(r.get(c)) for c in preview_cols]))
+    table = dbc.Table([header, html.Tbody(body_rows)],
+                      size="sm", striped=True, bordered=True,
+                      className="mb-0 mt-2")
+    note = ""
+    if len(records) > 5:
+        note = html.Div(f"Showing first 5 of {len(records)} rows.",
+                        className="text-muted small mt-1")
+    return html.Div([html.Div(summary), html.Div(dso_line, className="text-muted small"), table, note])
+
+
+@callback(
+    Output("td-pending", "data"),
+    Output("td-preview", "children"),
+    Output("td-review-wrap", "style"),
+    Output("td-status", "children", allow_duplicate=True),
+    Input("td-generate-btn", "n_clicks"),
+    State("td-subcase", "value"),
+    State("td-scenario", "value"),
+    State("td-total", "value"),
+    State("td-unpaid", "value"),
+    State("td-seed", "value"),
+    State("td-mode", "value"),
+    prevent_initial_call=True,
+)
+def td_generate_preview(n_clicks, subcase_id, scenario, total, unpaid, seed_text, mode):
+    import random
+    hidden = {"display": "none"}
+    shown = {"display": "block"}
+    auth.guard("admin")
+    if not n_clicks:
+        raise PreventUpdate
+    if subcase_id is None:
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Select a subcase to generate into first.", color="warning")
+    if scenario not in test_data.SCENARIOS:
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Select a scenario first.", color="warning")
+    if mode not in data_import.IMPORT_MODES:
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Select a write mode first.", color="warning")
+    try:
+        total = int(total)
+        unpaid = int(unpaid)
+    except (TypeError, ValueError):
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Invoice counts must be whole numbers.", color="warning")
+    seed_text = (seed_text or "").strip()
+    if seed_text:
+        try:
+            seed = int(seed_text)
+        except ValueError:
+            seed = seed_text
+    else:
+        seed = random.randrange(2 ** 31)
+    try:
+        sub = store.get_subcase(subcase_id)
+        petition = store.get_main_by_id(sub["main_case_id"])["petition_date"]
+        records = test_data.generate_test_invoices(
+            petition, scenario, total_paid=total, unpaid_count=unpaid, seed=seed)
+    except ValueError as e:
+        return None, dash.no_update, hidden, dbc.Alert(str(e), color="danger")
+    pending = {"subcase_id": int(subcase_id), "mode": mode, "records": records,
+               "scenario": scenario, "seed": seed}
+    preview = dbc.Alert(
+        [html.Strong(f"Scenario '{scenario}' (seed {seed}). "),
+         _td_preview_table(records, petition)],
+        color="success")
+    return pending, preview, shown, dash.no_update
+
+
+def _td_plan(pending):
+    """Validate a pending generation against the current admin user."""
+    auth.guard("admin")
+    if not pending or not pending.get("records") or not pending.get("subcase_id"):
+        return None, dbc.Alert("Generate a preview first.", color="warning")
+    if pending.get("mode") not in data_import.IMPORT_MODES:
+        return None, dbc.Alert("Select a write mode first.", color="warning")
+    try:
+        sub = store.get_subcase(pending["subcase_id"])
+    except ValueError as e:
+        return None, dbc.Alert(str(e), color="danger")
+    existing = store.count_subcase_invoices(pending["subcase_id"])
+    label = sub.get("display_number")
+    name = sub.get("transferee_name") or "subcase"
+    who = f"{name} ({label})" if label else name
+    n = len(pending["records"])
+    scenario = pending.get("scenario") or "ordinary"
+    if pending["mode"] == "replace":
+        detail = (f"This will delete ALL {existing} existing invoice row(s) in "
+                  f"subcase '{who}' and generate {n} '{scenario}' test row(s) "
+                  f"(seed {pending.get('seed')}).")
+    else:
+        detail = (f"This will append {n} '{scenario}' test row(s) "
+                  f"(seed {pending.get('seed')}) to subcase '{who}' "
+                  f"(which has {existing} existing row(s)).")
+    return {"subcase_id": int(pending["subcase_id"]), "mode": pending["mode"],
+            "label": who, "detail": detail,
+            "records": pending["records"]}, None
+
+
+@callback(
+    Output("td-status", "children", allow_duplicate=True),
+    Output("td-confirm-modal", "is_open"),
+    Output("td-confirm-body", "children"),
+    Input("td-review-btn", "n_clicks"),
+    State("td-pending", "data"),
+    prevent_initial_call=True,
+)
+def td_review_arm(n_clicks, pending):
+    plan, error = _td_plan(pending)
+    if error is not None:
+        return error, False, dash.no_update
+    body = [html.P(plan["detail"]),
+            html.P("This action cannot be undone. Reselect the subcase in "
+                   "Analysis afterwards to reload its data.",
+                   className="text-muted")]
+    return dash.no_update, True, body
+
+
+@callback(
+    Output("td-confirm-modal", "is_open", allow_duplicate=True),
+    Input("td-confirm-cancel", "n_clicks"),
+    prevent_initial_call=True,
+)
+def td_confirm_cancel(_):
+    return False
+
+
+@callback(
+    Output("td-status", "children", allow_duplicate=True),
+    Output("td-confirm-modal", "is_open", allow_duplicate=True),
+    Output("td-pending", "data", allow_duplicate=True),
+    Output("td-review-wrap", "style", allow_duplicate=True),
+    Output("td-target-info", "children", allow_duplicate=True),
+    Input("td-confirm-yes", "n_clicks"),
+    State("td-pending", "data"),
+    prevent_initial_call=True,
+)
+def td_confirm_generate(n_clicks, pending):
+    hidden = {"display": "none"}
+    plan, error = _td_plan(pending)
+    if error is not None:
+        return error, False, dash.no_update, dash.no_update, dash.no_update
+    try:
+        result = store.import_subcase_invoices(
+            plan["subcase_id"], plan["records"], plan["mode"])
+    except ValueError as e:
+        return dbc.Alert(str(e), color="danger"), False, dash.no_update, dash.no_update, dash.no_update
+    if plan["mode"] == "replace":
+        msg = (f"Generated {result['imported']} test invoice row(s) in "
+               f"'{plan['label']}' (replaced {result['deleted']} existing row(s)).")
+    else:
+        msg = (f"Appended {result['imported']} test invoice row(s) to "
+               f"'{plan['label']}'.")
+    status = dbc.Alert(msg + " Reselect the subcase in Analysis to view it.",
+                       color="success")
     existing = store.count_subcase_invoices(plan["subcase_id"])
     info = f"Target: {plan['label']} — {existing} invoice row(s)."
     return status, False, None, hidden, info
