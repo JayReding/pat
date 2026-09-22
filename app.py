@@ -1122,14 +1122,38 @@ def _backup_page():
     )
 
 
+_IMP_MAP_COLUMNS = list(data_import.TEMPLATE_COLUMNS)
+_IMP_MAP_A = [f"imp-map-a-{i}" for i in range(len(_IMP_MAP_COLUMNS))]
+_IMP_MAP_B = [f"imp-map-b-{i}" for i in range(len(_IMP_MAP_COLUMNS))]
+
+
+def _imp_map_grid(prefix, ids):
+    rows = []
+    for i, col in enumerate(_IMP_MAP_COLUMNS):
+        required = " *" if col in data_import.REQUIRED_COLUMNS else ""
+        rows.append(dbc.Row([
+            dbc.Col(html.Label(f"{col}{required}", htmlFor=ids[i],
+                               style={"fontWeight": "400"}),
+                    width=5),
+            dbc.Col(dcc.Dropdown(id=ids[i], options=[], placeholder="— ignore —",
+                                 clearable=True),
+                    width=7),
+        ], className="mb-1"))
+    return html.Div(rows)
+
+
 def _import_page():
     return _settings_chrome("import",
         dcc.Store(id="manage-boot", data=True),
+        dcc.Store(id="imp-raw-store", data=None),
+        dcc.Store(id="imp-raw-payments-store", data=None),
                 html.H3("Data Import", className="mb-3"),
                 html.P("Import invoice rows from an Excel workbook formatted like the "
-                       "subcase import template into an existing subcase. "
-                       "Upload a file to preview it; nothing is written until you confirm.",
-                       className="text-muted"),
+                       "subcase import template, or from a CSV export of another "
+                       "system (NetSuite, Salesforce, QuickBooks, Xero, Dynamics 365). "
+                       "Map columns, preview, then confirm — "
+                       "nothing is written until you confirm.",
+                        className="text-muted"),
                 _firm_picker("imp"),
                 html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
                     html.Label("Main Bankruptcy Case", htmlFor="imp-main",
@@ -1163,9 +1187,26 @@ def _import_page():
                                id="imp-template-btn", color="secondary", n_clicks=0),
                     dcc.Download(id="imp-template-download"),
                 ]),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label("File layout", style={"fontWeight": "600"}),
+                    dbc.RadioItems(
+                        id="imp-file-mode",
+                        options=[
+                            {"label": "Single file (invoices already paired with payments)",
+                             "value": "joined"},
+                            {"label": "Two files (invoices + payments, joined on invoice number)",
+                             "value": "two-file"},
+                        ],
+                        value="joined",
+                    ),
+                    html.Small("Most ERP exports list invoices and payments separately — "
+                               "use two-file mode and PAT will join them. Invoices with "
+                               "no matching payment are imported as unpaid (new value).",
+                               className="text-muted d-block"),
+                ]),
                 dcc.Upload(
                     id="imp-upload",
-                    accept=".xlsx",
+                    accept=".xlsx,.csv",
                     multiple=False,
                     style={
                         "width": "100%", "borderWidth": "2px",
@@ -1178,13 +1219,78 @@ def _import_page():
                         html.I(className="fa-solid fa-cloud-arrow-up fa-2x mb-2"),
                         html.Div(dbc.Button(
                             [html.I(className="fa-solid fa-folder-open me-2"),
-                             "Choose Excel file…"],
+                             "Choose Excel or CSV file…"],
                             color="primary", size="lg"),
                             className="mb-2"),
-                        html.Div("or drag and drop a .xlsx file here",
+                        html.Div("or drag and drop a .xlsx or .csv file here",
                                  className="text-muted"),
                     ]),
                 ),
+                html.Div(id="imp-payments-wrap", style={"display": "none"}, children=[
+                    html.Div("Payments file", className="mt-3 mb-2",
+                             style={"fontWeight": "600"}),
+                    dcc.Upload(
+                        id="imp-upload-payments",
+                        accept=".xlsx,.csv",
+                        multiple=False,
+                        style={
+                            "width": "100%", "borderWidth": "2px",
+                            "borderStyle": "dashed", "borderRadius": "8px",
+                            "textAlign": "center", "cursor": "pointer",
+                            "padding": "20px 16px",
+                            "backgroundColor": "var(--bs-light)",
+                        },
+                        children=html.Div([
+                            html.Div(dbc.Button(
+                                [html.I(className="fa-solid fa-folder-open me-2"),
+                                 "Choose payments file…"],
+                                color="secondary"),
+                                className="mb-2"),
+                            html.Div("a .xlsx or .csv file with one row per payment",
+                                     className="text-muted"),
+                        ]),
+                    ),
+                ]),
+                html.Div(id="imp-map-info", className="text-muted small mt-3"),
+                html.Div(className="mb-2 mt-2", style={"maxWidth": "640px"}, children=[
+                    html.Div(id="imp-panel-a-title", style={"fontWeight": "600"}),
+                    _imp_map_grid("a", _IMP_MAP_A),
+                ]),
+                html.Div(id="imp-panel-b-wrap", style={"display": "none"},
+                         className="mb-2", children=[
+                    html.Div("Payments file columns", style={"fontWeight": "600"}),
+                    _imp_map_grid("b", _IMP_MAP_B),
+                ]),
+                html.Div(id="imp-join-row", style={"display": "none"},
+                         className="mb-2 d-flex gap-3 flex-wrap", children=[
+                    html.Div(style={"flex": "1 1 200px"}, children=[
+                        html.Label("Invoices: column holding the invoice reference",
+                                   htmlFor="imp-join-a"),
+                        dcc.Dropdown(id="imp-join-a", clearable=False),
+                    ]),
+                    html.Div(style={"flex": "1 1 200px"}, children=[
+                        html.Label("Payments: column holding the invoice reference",
+                                   htmlFor="imp-join-b"),
+                        dcc.Dropdown(id="imp-join-b", clearable=False),
+                    ]),
+                ]),
+                html.Div(className="mb-2 d-flex gap-3 flex-wrap align-items-end", children=[
+                    html.Div(children=[
+                        html.Label("Date format", htmlFor="imp-date-format"),
+                        dcc.Dropdown(
+                            id="imp-date-format",
+                            options=[
+                                {"label": "Auto (month first)", "value": "auto"},
+                                {"label": "MM/DD/YYYY", "value": "mdy"},
+                                {"label": "DD/MM/YYYY", "value": "dmy"},
+                            ],
+                            value="auto", clearable=False, searchable=False,
+                            style={"minWidth": "200px"}),
+                    ]),
+                    dbc.Button([html.I(className="fa-solid fa-check me-2"),
+                                "Validate & Preview"],
+                               id="imp-validate-btn", color="primary", n_clicks=0),
+                ]),
                 html.Div(id="imp-preview", className="mt-3"),
                 dcc.Store(id="imp-pending", data=None),
                 html.Div(id="imp-review-wrap", style={"display": "none"}, children=[
@@ -3918,23 +4024,160 @@ def _imp_preview_table(records, petition_date):
     return html.Div([html.Div(summary), table, note])
 
 
+def _imp_decode_upload(contents, filename):
+    """Decode an upload to (kind, headers, raw_rows); kind is 'csv'/'xlsx'.
+
+    Excel workbooks use the strict template sheet; anything else is read as
+    CSV.  Dates in stored rows are plain text so the payload stays JSON-safe.
+    """
+    import base64
+    from datetime import date as _date, datetime as _dt
+    try:
+        _, content_string = (contents or "").split(",", 1)
+    except ValueError:
+        content_string = contents or ""
+    raw_bytes = base64.b64decode(content_string)
+    name = (filename or "").lower()
+    if name.endswith((".xlsx", ".xls")):
+        headers, raw_rows = data_import.parse_import_workbook(raw_bytes)
+        return "xlsx", headers, raw_rows
+    headers, raw_rows = data_import.parse_import_csv(raw_bytes)
+    for row in raw_rows:
+        for key, value in list(row.items()):
+            if isinstance(value, _dt):
+                row[key] = value.isoformat(sep=" ")
+            elif isinstance(value, _date):
+                row[key] = value.isoformat()
+    return "csv", headers, raw_rows
+
+
+def _imp_guess_join_key(headers):
+    for header in headers:
+        if re.search(r"invoic.*(num|no|#|id)|inv.*(num|no|#)|tranid",
+                     data_import.normalize_header(header)):
+            return header
+    return headers[0] if headers else None
+
+
+_IMP_PARSE_OUTPUTS = (
+    [Output("imp-raw-store", "data"),
+     Output("imp-raw-payments-store", "data"),
+     Output("imp-map-info", "children"),
+     Output("imp-panel-a-title", "children"),
+     Output("imp-panel-b-wrap", "style"),
+     Output("imp-join-row", "style"),
+     Output("imp-payments-wrap", "style"),
+     Output("imp-join-a", "options"),
+     Output("imp-join-a", "value"),
+     Output("imp-join-b", "options"),
+     Output("imp-join-b", "value"),
+     Output("imp-pending", "data", allow_duplicate=True),
+     Output("imp-preview", "children", allow_duplicate=True),
+     Output("imp-review-wrap", "style", allow_duplicate=True)]
+    + [Output(i, "options") for i in _IMP_MAP_A + _IMP_MAP_B]
+    + [Output(i, "value") for i in _IMP_MAP_A + _IMP_MAP_B]
+)
+
+
 @callback(
-    Output("imp-pending", "data", allow_duplicate=True),
-    Output("imp-preview", "children"),
-    Output("imp-review-wrap", "style", allow_duplicate=True),
-    Output("imp-status", "children", allow_duplicate=True),
+    *_IMP_PARSE_OUTPUTS,
     Input("imp-upload", "contents"),
-    State("imp-upload", "filename"),
+    Input("imp-upload", "filename"),
+    Input("imp-upload-payments", "contents"),
+    Input("imp-upload-payments", "filename"),
+    Input("imp-file-mode", "value"),
     State("imp-subcase", "value"),
-    State("imp-mode", "value"),
     prevent_initial_call=True,
 )
-def imp_upload_parse(contents, filename, subcase_id, mode):
-    import base64
+def imp_parse_files(contents, filename, pay_contents, pay_filename,
+                    file_mode, subcase_id):
+    hidden = {"display": "none"}
+    user = auth.guard("admin", "firm_admin", "case_manager")
+    n_map = len(_IMP_MAP_A) + len(_IMP_MAP_B)
+    empty = [([], None)] * n_map
+    base_clear = [None, None, "", "File columns", hidden, hidden, hidden,
+                  [], None, [], None, None, [], hidden]
+    if subcase_id is None:
+        info = dbc.Alert("Select a subcase to import into first.",
+                         color="warning")
+        return [*base_clear[:2], info, *base_clear[3:], *[o for pair in empty for o in pair]]
+    if not auth.can_edit_subcase(user, int(subcase_id)):
+        info = _cm_error_alert("You do not have permission to modify that subcase.")
+        return [*base_clear[:2], info, *base_clear[3:], *[o for pair in empty for o in pair]]
+    two_file = (file_mode == "two-file")
+    if not contents:
+        raise PreventUpdate
+    try:
+        _kind, headers, raw_rows = _imp_decode_upload(contents, filename)
+        pay_headers, pay_rows = [], []
+        if two_file:
+            if not pay_contents:
+                info = dbc.Alert("Two-file mode: upload the payments file too.",
+                                 color="warning")
+                return [None, None, info, *base_clear[3:],
+                        *[o for pair in empty for o in pair]]
+            _, pay_headers, pay_rows = _imp_decode_upload(pay_contents, pay_filename)
+    except ValueError as e:
+        return [None, None, _cm_error_alert(str(e)), *base_clear[3:],
+                *[o for pair in empty for o in pair]]
+    preset_a, map_a = data_import.detect_preset(headers)
+    opts_a = [{"label": h, "value": h} for h in headers]
+    vals_a = [map_a.get(col) for col in _IMP_MAP_COLUMNS]
+    if two_file:
+        preset_b, map_b = data_import.detect_preset(pay_headers)
+        opts_b = [{"label": h, "value": h} for h in pay_headers]
+        vals_b = [map_b.get(col) for col in _IMP_MAP_COLUMNS]
+        join_a_opts = opts_a
+        join_b_opts = opts_b
+        join_a = _imp_guess_join_key(headers)
+        join_b = _imp_guess_join_key(pay_headers)
+        info = (f"Detected {preset_a} invoices + {preset_b} payments — "
+                "adjust the mappings below, then Validate & Preview.")
+        title_a = "Invoices file columns"
+        wrap_b, join_row, pay_wrap = {}, {"display": "flex"}, {"display": "block"}
+    else:
+        opts_b, vals_b = [], [None] * len(_IMP_MAP_COLUMNS)
+        join_a_opts, join_b_opts, join_a, join_b = [], None, [], None
+        info = (f"Detected {preset_a} layout — adjust the mapping below, "
+                "then Validate & Preview. Columns marked * are required.")
+        title_a = "File columns"
+        wrap_b, join_row, pay_wrap = hidden, hidden, hidden
+    raw_store = {"headers": headers, "raw_rows": raw_rows,
+                 "filename": filename or "upload"}
+    pay_store = ({"headers": pay_headers, "raw_rows": pay_rows,
+                  "filename": pay_filename or "payments"}
+                 if two_file else None)
+    outs = [raw_store, pay_store, info, title_a, wrap_b, join_row, pay_wrap,
+            join_a_opts, join_a, join_b_opts, join_b,
+            None, [], hidden]
+    outs += [opts_a] * len(_IMP_MAP_COLUMNS) + [opts_b] * len(_IMP_MAP_COLUMNS)
+    outs += vals_a + vals_b
+    return outs
+
+
+@callback(
+    Output("imp-pending", "data", allow_duplicate=True),
+    Output("imp-preview", "children", allow_duplicate=True),
+    Output("imp-review-wrap", "style", allow_duplicate=True),
+    Output("imp-status", "children", allow_duplicate=True),
+    Input("imp-validate-btn", "n_clicks"),
+    State("imp-subcase", "value"),
+    State("imp-mode", "value"),
+    State("imp-file-mode", "value"),
+    State("imp-date-format", "value"),
+    State("imp-join-a", "value"),
+    State("imp-join-b", "value"),
+    State("imp-raw-store", "data"),
+    State("imp-raw-payments-store", "data"),
+    *[State(i, "value") for i in _IMP_MAP_A + _IMP_MAP_B],
+    prevent_initial_call=True,
+)
+def imp_validate_mapping(n_clicks, subcase_id, mode, file_mode, date_format,
+                         join_a, join_b, raw_store, pay_store, *map_values):
     hidden = {"display": "none"}
     shown = {"display": "block"}
     user = auth.guard("admin", "firm_admin", "case_manager")
-    if not contents:
+    if not n_clicks:
         raise PreventUpdate
     if subcase_id is None:
         return None, dash.no_update, hidden, dbc.Alert(
@@ -3945,24 +4188,58 @@ def imp_upload_parse(contents, filename, subcase_id, mode):
     if mode not in data_import.IMPORT_MODES:
         return None, dash.no_update, hidden, dbc.Alert(
             "Select an import mode first.", color="warning")
+    if not raw_store or not raw_store.get("raw_rows"):
+        return None, dash.no_update, hidden, dbc.Alert(
+            "Upload a file first.", color="warning")
+    n = len(_IMP_MAP_COLUMNS)
+    map_a_vals, map_b_vals = list(map_values[:n]), list(map_values[n:])
+    mapping_a = dict(zip(_IMP_MAP_COLUMNS, map_a_vals))
+    dayfirst = (date_format == "dmy")
+    two_file = (file_mode == "two-file")
+    filename = raw_store.get("filename") or "upload"
     try:
-        _, content_string = contents.split(",", 1)
-    except ValueError:
-        content_string = contents
-    try:
-        raw_bytes = base64.b64decode(content_string)
-        _, raw_rows = data_import.parse_import_workbook(raw_bytes)
-        records, errors = data_import.validate_import_rows(raw_rows)
+        if two_file:
+            if not pay_store or not pay_store.get("raw_rows"):
+                return None, dash.no_update, hidden, dbc.Alert(
+                    "Two-file mode: upload the payments file too.", color="warning")
+            mapping_b = dict(zip(_IMP_MAP_COLUMNS, map_b_vals))
+            src_to_a = {v: k for k, v in mapping_a.items() if v}
+            src_to_b = {v: k for k, v in mapping_b.items() if v}
+            inv_key = src_to_a.get(join_a)
+            pay_key = src_to_b.get(join_b)
+            if inv_key is None or pay_key is None:
+                return None, dash.no_update, hidden, dbc.Alert(
+                    "Map the invoice-reference columns (join keys) on both files first.",
+                    color="warning")
+            joined, join_errors = data_import.join_invoices_payments(
+                data_import.apply_column_map(raw_store["raw_rows"], mapping_a),
+                data_import.apply_column_map(pay_store["raw_rows"], mapping_b),
+                inv_key, pay_key)
+            if join_errors:
+                shown_errors = join_errors[:20]
+                extra = (f"... and {len(join_errors) - len(shown_errors)} more row(s)."
+                         if len(join_errors) > len(shown_errors) else "")
+                return None, dash.no_update, hidden, dbc.Alert(
+                    [html.Strong("Payments file could not be joined — "),
+                     html.Ul([html.Li(e) for e in shown_errors]),
+                     html.Div(extra, className="small")],
+                    color="danger")
+            records, errors = data_import.validate_mapped_rows(joined, dayfirst=dayfirst)
+            filename = f"{filename} + {pay_store.get('filename') or 'payments'}"
+        else:
+            records, errors = data_import.validate_mapped_rows(
+                data_import.apply_column_map(raw_store["raw_rows"], mapping_a),
+                dayfirst=dayfirst)
     except ValueError as e:
         return None, dash.no_update, hidden, _cm_error_alert(str(e))
     if errors:
         shown_errors = errors[:20]
         extra = (f"... and {len(errors) - len(shown_errors)} more row(s). "
-                 "Fix the file and re-upload; nothing was imported."
+                 "Fix the file and re-validate; nothing was imported."
                  if len(errors) > len(shown_errors) else
-                 "Fix the file and re-upload; nothing was imported.")
+                 "Fix the file and re-validate; nothing was imported.")
         return None, dash.no_update, hidden, dbc.Alert(
-            [html.Strong(f"{filename or 'File'} rejected — "
+            [html.Strong(f"{filename} rejected — "
                          f"{len(errors)} invalid row(s). "),
              html.Ul([html.Li(e) for e in shown_errors]),
              html.Div(extra, className="small")],
@@ -3973,9 +4250,9 @@ def imp_upload_parse(contents, filename, subcase_id, mode):
     except ValueError as e:
         return None, dash.no_update, hidden, _cm_error_alert(str(e))
     pending = {"subcase_id": int(subcase_id), "mode": mode, "records": records,
-               "filename": filename or "upload.xlsx"}
+               "filename": filename}
     preview = dbc.Alert(
-        [html.Strong(f"Loaded {filename}. "),
+        [html.Strong(f"Mapped {filename}. "),
          _imp_preview_table(records, petition)],
         color="success")
     return pending, preview, shown, dash.no_update
@@ -3988,7 +4265,7 @@ def _imp_plan(pending):
     """
     user = auth.guard("admin", "firm_admin", "case_manager")
     if not pending or not pending.get("records") or not pending.get("subcase_id"):
-        return None, dbc.Alert("Upload a valid Excel file first.", color="warning")
+        return None, dbc.Alert("Upload and validate a file first.", color="warning")
     if pending.get("mode") not in data_import.IMPORT_MODES:
         return None, dbc.Alert("Select an import mode first.", color="warning")
     try:
