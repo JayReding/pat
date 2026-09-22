@@ -3,7 +3,7 @@ import json
 import os
 import re
 import secrets
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from dash import Dash, html, dcc, callback, Output, Input, State, ALL
 from dash.exceptions import PreventUpdate
 import dash
@@ -320,15 +320,16 @@ def _main_sidebar(active):
         portfolio_link = dbc.NavLink(
             [html.I(className="fa-solid fa-briefcase fa-fw me-3"), "Portfolio View"],
             href="/portfolio", className="analysis-nav-link",
-            id="portfolio-nav-btn", style={"display": "none"},
         )
     return html.Aside(className="navbar navbar-dark bg-dark analysis-sidebar", children=[
         html.Div("Analysis", className="analysis-sidebar-heading"),
         dbc.Nav(analysis_links, vertical=True, className="navbar-nav w-100"),
         html.Hr(className="analysis-sidebar-divider"),
-        html.Div("Portfolio", className="analysis-sidebar-heading"),
-        dbc.Nav([portfolio_link], vertical=True, className="navbar-nav w-100"),
-        html.Hr(className="analysis-sidebar-divider"),
+        html.Div(id="portfolio-nav-section", style={"display": "none"}, children=[
+            html.Div("Portfolio", className="analysis-sidebar-heading"),
+            dbc.Nav([portfolio_link], vertical=True, className="navbar-nav w-100"),
+            html.Hr(className="analysis-sidebar-divider"),
+        ]),
         html.Div("Management", className="analysis-sidebar-heading"),
         dbc.Nav(
             [dbc.NavLink(
@@ -726,12 +727,32 @@ def _settings_nav_link(key, label, href, icon, nav_id, gated, active):
 def _settings_sidebar(active):
     sections = []
     for heading, links in _SETTINGS_LINKS:
-        sections.append(html.Div(heading, className="analysis-sidebar-heading"))
-        sections.append(dbc.Nav(
-            [_settings_nav_link(k, lab, href, ico, nid, gated, active)
-             for k, lab, href, ico, nid, gated in links],
-            vertical=True, className="navbar-nav w-100",
-        ))
+        block = [
+            html.Div(heading, className="analysis-sidebar-heading"),
+            dbc.Nav(
+                [_settings_nav_link(k, lab, href, ico, nid, gated, active)
+                 for k, lab, href, ico, nid, gated in links],
+                vertical=True, className="navbar-nav w-100",
+            ),
+        ]
+        if heading == "Administration":
+            # Hidden until manage_admin_gate reveals it; keeps regular
+            # users and case managers from seeing an empty header.
+            sections.append(html.Div(
+                id="admin-nav-section",
+                style={"display": "none"},
+                children=block,
+            ))
+        elif heading == "Case Management":
+            # Hidden until manage_admin_gate reveals it; viewers
+            # (role == "user") must not see this section at all.
+            sections.append(html.Div(
+                id="case-mgmt-nav-section",
+                style={"display": "none"},
+                children=block,
+            ))
+        else:
+            sections.extend(block)
     sections.append(html.Div(className="mt-auto", children=[
         html.Hr(className="analysis-sidebar-divider"),
         dbc.Nav(
@@ -1409,6 +1430,31 @@ def _account_page():
                 _cm_field('Email', "account-email", "email"),
                 dbc.Button("Save Settings", id="account-save-btn", n_clicks=0, color="primary", className="mt-2"),
                 html.Div(id="account-status", className="mt-3"),
+                html.Hr(style={"margin": "24px 0"}),
+                html.H5('Change Password'),
+                html.P('Strength is advisory only and never blocks saving. It measures overall entropy, not character types.',
+                       className="text-muted"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label('Current password', htmlFor="account-current-pw", style={"fontWeight": "600"}),
+                    dbc.Input(id="account-current-pw", type="password", className="form-control",
+                              autoComplete="current-password",
+                              style={"height": "50px", "fontSize": "1rem"}),
+                ]),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label('New password', htmlFor="account-new-pw", style={"fontWeight": "600"}),
+                    dbc.Input(id="account-new-pw", type="password", className="form-control",
+                              autoComplete="new-password",
+                              style={"height": "50px", "fontSize": "1rem"}),
+                ]),
+                html.Div(id="account-pw-strength", className="mb-2"),
+                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                    html.Label('Confirm new password', htmlFor="account-confirm-pw", style={"fontWeight": "600"}),
+                    dbc.Input(id="account-confirm-pw", type="password", className="form-control",
+                              autoComplete="new-password",
+                              style={"height": "50px", "fontSize": "1rem"}),
+                ]),
+                dbc.Button("Change Password", id="account-pw-btn", n_clicks=0, color="secondary", className="mt-2"),
+                html.Div(id="account-pw-status", className="mt-3"),
     )
 
 
@@ -2470,6 +2516,8 @@ def update_user_badge(_boot, _saved):
     Output("email-settings-nav-btn", "style"),
     Output("import-nav-btn", "style"),
     Output("test-data-nav-btn", "style"),
+    Output("admin-nav-section", "style"),
+    Output("case-mgmt-nav-section", "style"),
     Input("manage-boot", "data"),
 )
 def manage_admin_gate(_):
@@ -2477,20 +2525,21 @@ def manage_admin_gate(_):
     show = {"display": "block"}
     hide = {"display": "none"}
     if u.role == "admin":
-        return show, show, show, show, show
+        return show, show, show, show, show, show, show
     if u.role == "firm_admin":
-        return show, show, hide, show, hide
+        return show, show, hide, show, hide, show, show
     if u.role == "case_manager":
-        return hide, hide, hide, show, hide
-    return hide, hide, hide, hide, hide
+        return hide, hide, hide, show, hide, hide, show
+    return hide, hide, hide, hide, hide, hide, hide
 
 
 @callback(
-    Output("portfolio-nav-btn", "style"),
-    Input("analysis-boot", "data"),
+    Output("portfolio-nav-section", "style"),
+    Input("shell-boot", "data"),
 )
 def analysis_portfolio_gate(_):
-    # Portfolio is for case managers and above.
+    # Portfolio is for case managers and above; hide the whole section
+    # (header + link + divider) so regular users see no empty header.
     if auth.current_user.role == "user":
         return {"display": "none"}
     return {"display": "block"}
@@ -2502,9 +2551,11 @@ def _portfolio_stat(label, value, icon):
         "borderRadius": "0.375rem", "border": "1px solid var(--bs-border-color)",
         "backgroundColor": "var(--bs-tertiary-bg)",
     }, children=[
-        html.I(className=f"{icon} me-2", style={"opacity": ".8"}),
-        html.Span(label, className="text-muted"),
         html.Div(value, style={"fontSize": "1.35rem", "fontWeight": "700"}),
+        html.Div(children=[
+            html.I(className=f"{icon} me-2", style={"opacity": ".8"}),
+            html.Span(label, className="text-muted"),
+        ]),
     ])
 
 
@@ -2580,6 +2631,40 @@ def _avatar_swatches(selected_color):
     ]
 
 
+def _password_entropy_bits(pw):
+    """Total Shannon entropy (bits) of a password string.
+
+    Case-sensitive and distribution-based: -sum(p(c) * log2(p(c))) * len.
+    Empty input scores 0.0. Advisory only; never blocks saving.
+    """
+    import math
+    from collections import Counter
+    if not pw:
+        return 0.0
+    n = len(pw)
+    return max(0.0, -sum((c / n) * math.log2(c / n) for c in Counter(pw).values()) * n)
+
+
+def _password_strength(bits):
+    """Map entropy bits to (label, badge color): Poor red, Marginal amber, Good green."""
+    if bits is None or bits < 28:
+        return "Poor", "danger"
+    if bits <= 50:
+        return "Marginal", "warning"
+    return "Good", "success"
+
+
+def _password_strength_display(pw):
+    bits = _password_entropy_bits(pw or "")
+    if not pw:
+        return html.Span("Enter a new password to see its strength.", className="text-muted")
+    label, color = _password_strength(bits)
+    return html.Span(children=[
+        dbc.Badge(label, color=color, className="me-2"),
+        html.Span(f"~{bits:.0f} bits of entropy", className="text-muted"),
+    ])
+
+
 @callback(
     Output("account-avatar-color", "data"),
     Output("account-name", "value"),
@@ -2645,6 +2730,44 @@ def account_save(trigger, name, email, avatar_color):
 )
 def _arm_account_save(n):
     return n or 0
+
+
+@callback(
+    Output("account-pw-strength", "children"),
+    Input("account-new-pw", "value"),
+)
+def account_pw_meter(new_pw):
+    return _password_strength_display(new_pw)
+
+
+@callback(
+    Output("account-pw-status", "children"),
+    Output("account-current-pw", "value"),
+    Output("account-new-pw", "value"),
+    Output("account-confirm-pw", "value"),
+    Input("account-pw-btn", "n_clicks"),
+    State("account-current-pw", "value"),
+    State("account-new-pw", "value"),
+    State("account-confirm-pw", "value"),
+    prevent_initial_call=True,
+)
+def account_change_password(n, current_pw, new_pw, confirm_pw):
+    if not n:
+        raise PreventUpdate
+    if not current_pw or not new_pw or not confirm_pw:
+        return dbc.Alert("Enter your current password and type the new password twice.", color="warning"), dash.no_update, dash.no_update, dash.no_update
+    if not (new_pw or "").strip():
+        return dbc.Alert("New password cannot be blank.", color="warning"), dash.no_update, dash.no_update, dash.no_update
+    # Re-read the user row so verification uses the live hash, not a stale session copy.
+    row = store.get_user_by_id(auth.current_user.id)
+    if row is None or not check_password_hash(row["password_hash"], current_pw):
+        return dbc.Alert("Current password is incorrect.", color="danger"), dash.no_update, dash.no_update, dash.no_update
+    if new_pw != confirm_pw:
+        return dbc.Alert("New passwords do not match.", color="warning"), dash.no_update, dash.no_update, dash.no_update
+    store.reset_user_password(row["id"], generate_password_hash(new_pw))
+    bits = _password_entropy_bits(new_pw)
+    label, _ = _password_strength(bits)
+    return dbc.Alert(f"Password changed. Strength: {label} (~{bits:.0f} bits).", color="success"), "", "", ""
 
 
 @callback(
