@@ -42,7 +42,9 @@ def generate(source_rows, petition_date):
         for col in ('Transfer Amount', 'Invoice Amount', 'Check Amount'):
             if row.get(col) is not None:
                 row[col] = round(_jitter(rng, row[col], *AMOUNT_RANGE), 2)
-        for col in ('WDPD', 'WI2DEL'):
+        if row.get('Invoice Amount Paid') is None:
+            row['Invoice Amount Paid'] = row.get('Invoice Amount')
+        for col in ('Weighted Days Past Due', 'Weighted Invoice to Payment'):
             if row.get(col) is not None:
                 row[col] = round(_jitter(rng, row[col], *DAY_RANGE), 2)
         if row.get('Days Past Due') is not None:

@@ -17,6 +17,8 @@ Unpaid preference rows model new-value shipments: no transfer/payment,
 import random
 from datetime import datetime, timedelta
 
+import data_import
+
 SCENARIOS = ("ordinary", "late", "early")
 
 HISTORICAL_DAYS = 540  # ~18 months before the preference window
@@ -50,24 +52,30 @@ def _paid_row(rng, seq, payment_date, mean, std):
     amount = round(rng.uniform(AMOUNT_MIN, AMOUNT_MAX), 2)
     dso = _sample_dso(rng, mean, std)
     invoice_date = payment_date - timedelta(days=dso)
-    return {
+    # Weighted fields use the shared import formula (paid-amount basis) so
+    # generated rows match imported rows exactly; the write path inserts
+    # records directly without revalidation.
+    record = {
         "Transfer Number": f"T-TEST-{seq:04d}",
         "Transfer Amount": amount,
         "Invoice Number": f"INV-TEST-{seq:04d}",
         "Invoice Amount": amount,
+        "Invoice Amount Paid": amount,
         "Check Amount": None,
         "Payment Date": payment_date.isoformat(),
         "Invoice Date": invoice_date.isoformat(),
         "Invoice Due": (invoice_date + timedelta(days=TERMS_DAYS)).isoformat(),
         "Terms Days": TERMS_DAYS,
         "Days Past Due": dso - TERMS_DAYS,
-        "WDPD": None,
+        "Weighted Days Past Due": None,
         "Invoice to Payment": dso,
-        "WI2DEL": None,
+        "Weighted Invoice to Payment": None,
         "Age": None,
         "Unpaid": 0,
         "Check Date": payment_date.isoformat(),
     }
+    data_import.calculate_weighted_fields(record)
+    return record
 
 
 def _unpaid_row(rng, seq, pref_start, petition):
@@ -79,15 +87,16 @@ def _unpaid_row(rng, seq, pref_start, petition):
         "Transfer Amount": None,
         "Invoice Number": f"INV-TEST-NV-{seq:03d}",
         "Invoice Amount": amount,
+        "Invoice Amount Paid": None,
         "Check Amount": None,
         "Payment Date": None,
         "Invoice Date": invoice_date.isoformat(),
         "Invoice Due": (invoice_date + timedelta(days=TERMS_DAYS)).isoformat(),
         "Terms Days": TERMS_DAYS,
         "Days Past Due": None,
-        "WDPD": None,
+        "Weighted Days Past Due": None,
         "Invoice to Payment": None,
-        "WI2DEL": None,
+        "Weighted Invoice to Payment": None,
         "Age": None,
         "Unpaid": 1,
         "Check Date": None,

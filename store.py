@@ -29,6 +29,43 @@ def _migrate_main_case_names(conn):
     conn.commit()
 
 
+def _migrate_invoice_paid_columns(conn):
+    """Rename legacy weighted columns and add/backfill Invoice Amount Paid.
+
+    - ``WDPD`` -> ``Weighted Days Past Due``,
+      ``WI2DEL`` -> ``Weighted Invoice to Payment`` (schema-only renames).
+    - Adds ``Invoice Amount Paid`` and backfills it from ``Invoice Amount``.
+    - Recomputes both weighted columns from anchor dates on the paid-amount
+      basis so existing rows match the import math; rows with missing dates
+      yield NULL.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(invoice_records)").fetchall()}
+    renamed = False
+    if 'WDPD' in cols and 'Weighted Days Past Due' not in cols:
+        conn.execute('ALTER TABLE invoice_records RENAME COLUMN "WDPD" TO "Weighted Days Past Due"')
+        renamed = True
+    if 'WI2DEL' in cols and 'Weighted Invoice to Payment' not in cols:
+        conn.execute('ALTER TABLE invoice_records RENAME COLUMN "WI2DEL" TO "Weighted Invoice to Payment"')
+        renamed = True
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(invoice_records)").fetchall()}
+    added = False
+    if 'Invoice Amount Paid' not in cols:
+        conn.execute('ALTER TABLE invoice_records ADD COLUMN "Invoice Amount Paid" REAL')
+        added = True
+    if renamed or added:
+        conn.execute(
+            'UPDATE invoice_records SET "Invoice Amount Paid" = "Invoice Amount" '
+            'WHERE "Invoice Amount Paid" IS NULL')
+        conn.execute(
+            '''UPDATE invoice_records
+               SET "Weighted Days Past Due" = ROUND(
+                       "Invoice Amount Paid" * (julianday("Payment Date") - julianday("Invoice Due")), 2),
+                   "Weighted Invoice to Payment" = ROUND(
+                       "Invoice Amount Paid" * (julianday("Payment Date") - julianday("Invoice Date")), 2)
+               WHERE "Unpaid" != 1''')
+    conn.commit()
+
+
 def init_cases_db():
     conn = _connect_cases()
     _migrate_main_case_names(conn)
@@ -71,15 +108,16 @@ def init_cases_db():
             "Transfer Amount"   REAL,
             "Invoice Number"    TEXT,
             "Invoice Amount"    REAL,
+            "Invoice Amount Paid" REAL,
             "Check Amount"      REAL,
             "Payment Date"      TEXT,
             "Invoice Date"      TEXT,
             "Invoice Due"       TEXT,
             "Terms Days"        REAL,
             "Days Past Due"     INTEGER,
-            "WDPD"              REAL,
+            "Weighted Days Past Due" REAL,
             "Invoice to Payment" INTEGER,
-            "WI2DEL"            REAL,
+            "Weighted Invoice to Payment" REAL,
             "Age"               TEXT,
             "Unpaid"            INTEGER DEFAULT 0,
             "Check Date"        TEXT
@@ -90,6 +128,7 @@ def init_cases_db():
         cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if 'firm_id' not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN firm_id INTEGER NOT NULL DEFAULT 1")
+    _migrate_invoice_paid_columns(conn)
     conn.commit()
     conn.executescript('''
         CREATE INDEX IF NOT EXISTS idx_main_cases_firm ON main_cases(firm_id);
@@ -1629,15 +1668,16 @@ _INVOICE_IMPORT_COLUMNS = (
     "Transfer Amount",
     "Invoice Number",
     "Invoice Amount",
+    "Invoice Amount Paid",
     "Check Amount",
     "Payment Date",
     "Invoice Date",
     "Invoice Due",
     "Terms Days",
     "Days Past Due",
-    "WDPD",
+    "Weighted Days Past Due",
     "Invoice to Payment",
-    "WI2DEL",
+    "Weighted Invoice to Payment",
     "Age",
     "Unpaid",
     "Check Date",

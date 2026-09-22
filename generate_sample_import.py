@@ -27,15 +27,16 @@ COLUMNS = [
     "Transfer Amount",
     "Invoice Number",
     "Invoice Amount",
+    "Invoice Amount Paid",
     "Check Amount",
     "Payment Date",
     "Invoice Date",
     "Invoice Due",
     "Terms Days",
     "Days Past Due",
-    "WDPD",
+    "Weighted Days Past Due",
     "Invoice to Payment",
-    "WI2DEL",
+    "Weighted Invoice to Payment",
     "Age",
     "Unpaid",
     "Check Date",
@@ -50,7 +51,7 @@ REQUIRED = {
     "Invoice Date",
 }
 
-MONEY_COLUMNS = {"Transfer Amount", "Invoice Amount", "Check Amount"}
+MONEY_COLUMNS = {"Transfer Amount", "Invoice Amount", "Invoice Amount Paid", "Check Amount"}
 INTEGER_COLUMNS = {"Terms Days", "Days Past Due", "Invoice to Payment", "Unpaid"}
 
 _HEADER_REQUIRED_FILL = PatternFill("solid", fgColor="DDEBF7")  # light blue
@@ -64,18 +65,19 @@ _CURRENCY_FORMAT = "$#,##0.00;[Red]($#,##0.00)"
 # Rows 1-3 land in the historical window; rows 4-9 in the preference window;
 # rows 8-9 are flagged Unpaid=1 and feed the New Value frame.
 EXAMPLE_ROWS = [
-    # (Transfer No, Transfer Amt, Invoice No, Invoice Amt, Check Amt, Payment Date,
-    #  Invoice Date, Invoice Due, Terms Days, Days Past Due, WDPD, Invoice to Payment,
-    #  WI2DEL, Age, Unpaid, Check Date)
-    ("T-0001", 750.00,  "INV-1001", 750.00,  750.00,  "2023-05-10", "2023-04-25", "2023-05-25", 30, 0, 0, 15, 15, 15, 0, "2023-05-10"),
-    ("T-0002", 1250.00, "INV-1002", 1250.00, 1250.00, "2023-06-06", "2023-05-10", "2023-06-09", 30, 0, 0, 27, 27, 27, 0, "2023-06-06"),
-    ("T-0003", 500.00,  "INV-1003", 500.00,  500.00,  "2023-06-28", "2023-06-01", "2023-07-01", 30, 0, 0, 27, 27, 27, 0, "2023-06-28"),
-    ("T-0004", 900.00,  "INV-1004", 900.00,  900.00,  "2023-07-20", "2023-07-02", "2023-08-01", 30, 0, 0, 18, 18, 18, 0, "2023-07-20"),
-    ("T-0005", 1500.00, "INV-1005", 1500.00, 1500.00, "2023-08-12", "2023-07-19", "2023-08-18", 30, 0, 0, 24, 24, 24, 0, "2023-08-12"),
-    ("T-0006", 800.00,  "INV-1006", 800.00,  800.00,  "2023-09-03", "2023-08-15", "2023-09-14", 30, 0, 0, 19, 19, 19, 0, "2023-09-03"),
-    ("T-0007", 1100.00, "INV-1007", 1100.00, 1100.00, "2023-09-20", "2023-09-01", "2023-10-01", 30, 0, 0, 19, 19, 19, 0, "2023-09-20"),
-    ("T-0008", 650.00,  "INV-1008", 650.00,  None,    "2023-09-25", "2023-09-02", "2023-10-02", 30, 0, 0, 23, 23, 23, 1, "2023-09-25"),
-    ("T-0009", 420.00,  "INV-1009", 420.00,  None,    "2023-10-06", "2023-09-15", "2023-10-15", 30, 0, 0, 21, 21, 21, 1, "2023-10-06"),
+    # (Transfer No, Transfer Amt, Invoice No, Invoice Amt, Invoice Amt Paid, Check Amt,
+    #  Payment Date, Invoice Date, Invoice Due, Terms Days, Days Past Due,
+    #  Weighted Days Past Due, Invoice to Payment, Weighted Invoice to Payment,
+    #  Age, Unpaid, Check Date)
+    ("T-0001", 750.00,  "INV-1001", 750.00,  750.00,  750.00,  "2023-05-10", "2023-04-25", "2023-05-25", 30, 0, 0, 15, 11250.00, 15, 0, "2023-05-10"),
+    ("T-0002", 1250.00, "INV-1002", 1250.00, 1250.00, 1250.00, "2023-06-06", "2023-05-10", "2023-06-09", 30, 0, 0, 27, 33750.00, 27, 0, "2023-06-06"),
+    ("T-0003", 500.00,  "INV-1003", 500.00,  500.00,  500.00,  "2023-06-28", "2023-06-01", "2023-07-01", 30, 0, 0, 27, 13500.00, 27, 0, "2023-06-28"),
+    ("T-0004", 900.00,  "INV-1004", 900.00,  900.00,  900.00,  "2023-07-20", "2023-07-02", "2023-08-01", 30, 0, 0, 18, 16200.00, 18, 0, "2023-07-20"),
+    ("T-0005", 1500.00, "INV-1005", 1500.00, 1500.00, 1500.00, "2023-08-12", "2023-07-19", "2023-08-18", 30, 0, 0, 24, 36000.00, 24, 0, "2023-08-12"),
+    ("T-0006", 800.00,  "INV-1006", 800.00,  800.00,  800.00,  "2023-09-03", "2023-08-15", "2023-09-14", 30, 0, 0, 19, 15200.00, 19, 0, "2023-09-03"),
+    ("T-0007", 1100.00, "INV-1007", 1100.00, 1100.00, 1100.00, "2023-09-20", "2023-09-01", "2023-10-01", 30, 0, 0, 19, 20900.00, 19, 0, "2023-09-20"),
+    ("T-0008", 650.00,  "INV-1008", 650.00,  650.00,  None,    "2023-09-25", "2023-09-02", "2023-10-02", 30, 0, 0, 23, 14950.00, 23, 1, "2023-09-25"),
+    ("T-0009", 420.00,  "INV-1009", 420.00,  420.00,  None,    "2023-10-06", "2023-09-15", "2023-10-15", 30, 0, 0, 21, 8820.00, 21, 1, "2023-10-06"),
 ]
 
 INSTRUCTIONS = [
@@ -103,8 +105,14 @@ INSTRUCTIONS = [
     "    Invoice to Payment - days from invoice to payment; the weighted DSO",
     "      metric used in the analysis (payment date minus invoice date).",
     "    Days Past Due - the weighted DPD metric used in the analysis.",
+    "    Invoice Amount Paid - the portion of the invoice covered by the",
+    "      transfer; leave blank to default to the full Invoice Amount.",
     "  Optional:",
-    "    Check Amount, Invoice Due, Terms Days, WDPD, WI2DEL, Age, Check Date",
+    "    Check Amount, Invoice Due, Terms Days, Age, Check Date",
+    "  Calculated automatically on import (any values entered are ignored):",
+    "    Weighted Days Past Due - Invoice Amount Paid times Days Past Due.",
+    "    Weighted Invoice to Payment - Invoice Amount Paid times",
+    "      Invoice to Payment.",
     "    Unpaid - enter 1 to include the invoice in the New Value frame;",
     "             leave blank (or 0) otherwise. Defaults to 0.",
     "",

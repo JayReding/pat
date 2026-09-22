@@ -18,19 +18,27 @@ TEMPLATE_COLUMNS = [
     "Transfer Amount",
     "Invoice Number",
     "Invoice Amount",
+    "Invoice Amount Paid",
     "Check Amount",
     "Payment Date",
     "Invoice Date",
     "Invoice Due",
     "Terms Days",
     "Days Past Due",
-    "WDPD",
+    "Weighted Days Past Due",
     "Invoice to Payment",
-    "WI2DEL",
+    "Weighted Invoice to Payment",
     "Age",
     "Unpaid",
     "Check Date",
 ]
+
+# Weighted timing fields the app calculates on import from the amount paid
+# and anchor dates; any user-supplied values are ignored.
+CALCULATED_COLUMNS = frozenset({
+    "Weighted Days Past Due",
+    "Weighted Invoice to Payment",
+})
 
 REQUIRED_COLUMNS = {
     "Transfer Number",
@@ -41,8 +49,8 @@ REQUIRED_COLUMNS = {
     "Invoice Date",
 }
 
-MONEY_COLUMNS = {"Transfer Amount", "Invoice Amount", "Check Amount"}
-FLOAT_COLUMNS = {"WDPD", "WI2DEL"}
+MONEY_COLUMNS = {"Transfer Amount", "Invoice Amount", "Invoice Amount Paid", "Check Amount"}
+FLOAT_COLUMNS = {"Weighted Days Past Due", "Weighted Invoice to Payment"}
 INTEGER_COLUMNS = {"Terms Days", "Days Past Due", "Invoice to Payment"}
 DATE_COLUMNS = {"Payment Date", "Invoice Date", "Invoice Due", "Check Date"}
 
@@ -194,6 +202,10 @@ def validate_import_rows(raw_rows):
         row_errors = []
 
         for col in TEMPLATE_COLUMNS:
+            if col in CALCULATED_COLUMNS:
+                # Calculated on import; any supplied value is ignored.
+                record[col] = None
+                continue
             raw_val = raw.get(col)
 
             if col in DATE_COLUMNS:
@@ -252,8 +264,43 @@ def validate_import_rows(raw_rows):
         if row_errors:
             errors.append(f"Row {excel_row}: " + "; ".join(row_errors))
         else:
+            _calculate_weighted_fields(record)
             records.append(record)
     return records, errors
+
+
+def calculate_weighted_fields(record):
+    """Public wrapper for _calculate_weighted_fields (single formula shared
+    with non-import producers such as test_data)."""
+    _calculate_weighted_fields(record)
+
+
+def _calculate_weighted_fields(record):
+    """Calculate weighted timing fields from amount paid + dates (in place).
+
+    Weighted Days Past Due = Invoice Amount Paid x (Payment Date - Invoice
+    Due); Weighted Invoice to Payment = Invoice Amount Paid x (Payment Date
+    - Invoice Date).  A blank Invoice Amount Paid defaults to the Invoice
+    Amount.  Unpaid rows (or rows with missing dates) keep NULLs.
+    """
+    if record.get("Unpaid") == 1:
+        return
+    if record.get("Invoice Amount Paid") is None:
+        record["Invoice Amount Paid"] = record.get("Invoice Amount")
+    paid = record.get("Invoice Amount Paid")
+    try:
+        inv = datetime.strptime(record["Invoice Date"], "%Y-%m-%d").date() \
+            if record.get("Invoice Date") else None
+        pay = datetime.strptime(record["Payment Date"], "%Y-%m-%d").date() \
+            if record.get("Payment Date") else None
+        due = datetime.strptime(record["Invoice Due"], "%Y-%m-%d").date() \
+            if record.get("Invoice Due") else None
+    except ValueError:
+        return
+    if paid is not None and pay is not None and due is not None:
+        record["Weighted Days Past Due"] = round(float(paid) * (pay - due).days, 2)
+    if paid is not None and pay is not None and inv is not None:
+        record["Weighted Invoice to Payment"] = round(float(paid) * (pay - inv).days, 2)
 
 
 def partition_preview(records, petition_date):

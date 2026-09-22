@@ -12,6 +12,7 @@ HISTORICAL_COLUMNS = [
     "Payment Date",
     "Invoice Number",
     "Invoice Amount",
+    "Invoice Amount Paid",
     "Invoice Date",
     "Invoice Due",
     "Invoice to Payment",
@@ -53,7 +54,7 @@ _OCB_WEIGHTS = {
     "hist_amount": 1.4,
 }
 
-_MONEY_COLUMNS = {"Transfer Amount", "Invoice Amount"}
+_MONEY_COLUMNS = {"Transfer Amount", "Invoice Amount", "Invoice Amount Paid"}
 
 _COLUMN_WEIGHTS = {
     "Transfer Number": 1.0,
@@ -61,6 +62,7 @@ _COLUMN_WEIGHTS = {
     "Payment Date": 1.1,
     "Invoice Number": 1.0,
     "Invoice Amount": 1.4,
+    "Invoice Amount Paid": 1.4,
     "Invoice Date": 1.1,
     "Invoice Due": 1.1,
     "Invoice to Payment": 1.2,

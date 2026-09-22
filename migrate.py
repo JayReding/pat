@@ -70,10 +70,12 @@ def copy_legacy_rows(conn, subcase_id):
     idx = {c: cols.index(c) for c in cols}
     INSERT_COLS = ', '.join('"%s"' % c for c in
                             ['Transfer Number', 'Transfer Amount', 'Invoice Number', 'Invoice Amount',
+                             'Invoice Amount Paid',
                              'Check Amount', 'Payment Date', 'Invoice Date', 'Invoice Due', 'Terms Days',
-                             'Days Past Due', 'WDPD', 'Invoice to Payment', 'WI2DEL', 'Age', 'Unpaid',
+                             'Days Past Due', 'Weighted Days Past Due', 'Invoice to Payment',
+                             'Weighted Invoice to Payment', 'Age', 'Unpaid',
                              'Check Date'])
-    placeholders = ', '.join('?' * 16)
+    placeholders = ', '.join('?' * 17)
     sql = f"INSERT INTO invoice_records (subcase_id, {INSERT_COLS}) VALUES (?, {placeholders})"
     prepared = []
     for row in rows:
@@ -81,6 +83,7 @@ def copy_legacy_rows(conn, subcase_id):
         prepared.append((
             subcase_id,
             get('Transfer Number'), get('Transfer Amount'), get('Invoice Number'), get('Invoice Amount'),
+            get('Invoice Amount'),
             get('Check Amount'), get('Payment Date'), get('Invoice Date'), get('Invoice Due'),
             get('Terms Days'), as_whole_days(get('Days Past Due')), get('WDPD'), get('Invoice to Payment'),
             get('WI2DEL'), get('Age'), get('Unpaid'), get('Check Date'),
@@ -110,10 +113,12 @@ def insert_synthetic_rows(conn, subcase_id, offset):
     idx = {c: cols.index(c) for c in cols}
     INSERT_COLS = ', '.join('"%s"' % c for c in
                             ['Transfer Number', 'Transfer Amount', 'Invoice Number', 'Invoice Amount',
+                             'Invoice Amount Paid',
                              'Check Amount', 'Payment Date', 'Invoice Date', 'Invoice Due', 'Terms Days',
-                             'Days Past Due', 'WDPD', 'Invoice to Payment', 'WI2DEL', 'Age', 'Unpaid',
+                             'Days Past Due', 'Weighted Days Past Due', 'Invoice to Payment',
+                             'Weighted Invoice to Payment', 'Age', 'Unpaid',
                              'Check Date'])
-    placeholders = ', '.join('?' * 16)
+    placeholders = ', '.join('?' * 17)
     sql = f"INSERT INTO invoice_records (subcase_id, {INSERT_COLS}) VALUES (?, {placeholders})"
 
     prepared = []
@@ -125,6 +130,7 @@ def insert_synthetic_rows(conn, subcase_id, offset):
             'TT' + transfer[2:] if isinstance(transfer, str) and transfer.startswith('TR') else transfer,
             get('Transfer Amount'),
             '20' + invoice[2:] if isinstance(invoice, str) and len(invoice) > 2 else invoice,
+            get('Invoice Amount'),
             get('Invoice Amount'),
             get('Check Amount'),
             shift_dates(get('Payment Date'), offset),

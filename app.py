@@ -475,6 +475,7 @@ html.Div(children=[
                     {"field": "Payment Date"},
                     {"field": "Invoice Number"},
                     {"field": "Invoice Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
+                    {"field": "Invoice Amount Paid", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
                     {"field": "Invoice Date"},
                     {"field": "Invoice Due"},
                     {"field": "Invoice to Payment"},
@@ -516,6 +517,7 @@ html.Div(children=[
                 {"field": "Payment Date"},
                 {"field": "Invoice Number"},
                 {"field": "Invoice Amount", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
+                {"field": "Invoice Amount Paid", "valueFormatter": {"function": "d3.format('($,.2f')(params.value)"}},
                 {"field": "Invoice Date"},
                 {"field": "Invoice Due"},
                 {"field": "Invoice to Payment"},
@@ -4133,7 +4135,8 @@ def _td_preview_table(records, petition_date):
     except Exception:
         dso_line = ""
     preview_cols = ["Transfer Number", "Transfer Amount", "Invoice Number",
-                    "Invoice Amount", "Payment Date", "Invoice Date", "Unpaid"]
+                    "Invoice Amount", "Invoice Amount Paid", "Payment Date",
+                    "Invoice Date", "Unpaid"]
     header = html.Thead(html.Tr([html.Th(c) for c in preview_cols]))
     body_rows = []
     for r in records[:5]:
