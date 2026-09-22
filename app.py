@@ -274,6 +274,7 @@ _ANALYSIS_VIEWS = [
     ("insights", "Case Insights", "fa-solid fa-lightbulb"),
     ("historical", "Historical Period", "fa-solid fa-clock-rotate-left"),
     ("preference", "Preference Period", "fa-solid fa-calendar-days"),
+    ("graph", "Graph View", "fa-solid fa-chart-column"),
     ("new-value", "New Value", "fa-solid fa-hand-holding-dollar"),
     ("ocb", "Ordinary Course", "fa-solid fa-chart-line"),
 ]
@@ -522,6 +523,25 @@ html.Div(children=[
             ]
         ),
         ])
+    ]),
+    html.Div(id="view-graph", style={"display": "none"}, children=[
+        html.H3(children='Graph View'),
+        html.P('Historical vs preference period distributions overlaid. Both periods '
+               'are scaled to percent so their shapes can be compared directly.',
+               className="text-muted"),
+        html.Div(className="mb-3", style={"maxWidth": "340px"}, children=[
+            html.Label('Metric', htmlFor="graph-metric"),
+            dcc.Dropdown(id="graph-metric", options=[
+                {"label": "Invoice to Payment", "value": "Invoice to Payment"},
+                {"label": "Days Past Due", "value": "Days Past Due"},
+            ], value="Invoice to Payment", clearable=False, searchable=False),
+        ]),
+        dcc.Graph(
+            id="graph-distribution-graph",
+            style={"height": "480px"},
+            figure={},
+            config={"displaylogo": False, "responsive": True}
+        ),
     ]),
     html.Div(id="view-new-value", style={"display": "none"}, children=[
             dag.AgGrid(
@@ -2032,6 +2052,30 @@ def update_hist_stats(rowData):
     return _stats_table(rows)
 
 
+def _apply_distribution_style(fig, title, x_title, y_title, x_range=None):
+    """Shared styling for the period distribution graphs (single + overlay)."""
+    fig.update_layout(
+        title={"text": title, "x": 0.0, "font": {"size": 13}},
+        xaxis_title=x_title,
+        yaxis_title=y_title,
+        margin={"l": 50, "r": 20, "t": 50, "b": 45},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#343a40"},
+        showlegend=True,
+        legend={"font": {"color": "#000000"}, "bgcolor": "#ffffff",
+                "borderwidth": 1, "bordercolor": "#adb5bd"},
+        autosize=True,
+    )
+    fig.update_xaxes(
+        showgrid=False, zeroline=False,
+        showline=True, linewidth=1, linecolor="#adb5bd",
+        range=x_range,
+    )
+    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#adb5bd")
+    return fig
+
+
 @callback(
     Output("hist-distribution-graph", "figure"),
     Input("historical", "rowData"),
@@ -2057,27 +2101,13 @@ def update_hist_distribution(rowData):
         marker={"color": "#3459e6", "line": {"color": "#d8deea", "width": 1}},
         hovertemplate="Invoice to Payment: %{x} days<br>Number of Invoices: %{y}<extra></extra>"
     ))
-    fig.update_layout(
-        title={"text": f"Invoice to Payment Distribution ({n} invoices)",
-               "x": 0.0, "font": {"size": 13}},
-        xaxis_title="Invoice to Payment (days)",
-        yaxis_title="Number of Invoices",
-        margin={"l": 50, "r": 20, "t": 50, "b": 45},
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font={"color": "#343a40"},
-        showlegend=True,
-        legend={"font": {"color": "#000000"}, "bgcolor": "#ffffff",
-                "borderwidth": 1, "bordercolor": "#adb5bd"},
-        autosize=True,
+    return _apply_distribution_style(
+        fig,
+        f"Invoice to Payment Distribution ({n} invoices)",
+        "Invoice to Payment (days)",
+        "Number of Invoices",
+        x_range=[0, cap],
     )
-    fig.update_xaxes(
-        showgrid=False, zeroline=False,
-        showline=True, linewidth=1, linecolor="#adb5bd",
-        range=[0, cap],
-    )
-    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#adb5bd")
-    return fig
 
 
 @callback(
@@ -2105,27 +2135,68 @@ def update_pref_distribution(rowData):
         marker={"color": "#3459e6", "line": {"color": "#d8deea", "width": 1}},
         hovertemplate="Invoice to Payment: %{x} days<br>Number of Invoices: %{y}<extra></extra>"
     ))
-    fig.update_layout(
-        title={"text": f"Invoice to Payment Distribution ({n} invoices)",
-               "x": 0.0, "font": {"size": 13}},
-        xaxis_title="Invoice to Payment (days)",
-        yaxis_title="Number of Invoices",
-        margin={"l": 50, "r": 20, "t": 50, "b": 45},
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font={"color": "#343a40"},
-        showlegend=True,
-        legend={"font": {"color": "#000000"}, "bgcolor": "#ffffff",
-                "borderwidth": 1, "bordercolor": "#adb5bd"},
-        autosize=True,
+    return _apply_distribution_style(
+        fig,
+        f"Invoice to Payment Distribution ({n} invoices)",
+        "Invoice to Payment (days)",
+        "Number of Invoices",
+        x_range=[0, cap],
     )
-    fig.update_xaxes(
-        showgrid=False, zeroline=False,
-        showline=True, linewidth=1, linecolor="#adb5bd",
-        range=[0, cap],
+
+
+@callback(
+    Output("graph-distribution-graph", "figure"),
+    Input("historical", "rowData"),
+    Input("preference", "rowData"),
+    Input("graph-metric", "value"),
+)
+def update_graph_distribution(hist_rowData, pref_rowData, metric):
+    metric = metric or "Invoice to Payment"
+    hist_df = pd.DataFrame(hist_rowData or [])
+    pref_df = pd.DataFrame(pref_rowData or [])
+    if metric not in hist_df.columns and metric not in pref_df.columns:
+        return go.Figure()
+    x_hist = (hist_df[metric].dropna().to_numpy(dtype=float)
+              if metric in hist_df.columns else np.array([]))
+    x_pref = (pref_df[metric].dropna().to_numpy(dtype=float)
+              if metric in pref_df.columns else np.array([]))
+    if x_hist.size == 0 and x_pref.size == 0:
+        return go.Figure()
+    # Shared bins so the two periods are directly comparable: cap covers
+    # the 99th percentile of both periods; start accommodates negatives
+    # (e.g. Days Past Due paid early).
+    combined = np.concatenate([a for a in (x_hist, x_pref) if a.size])
+    cap = float(np.ceil(np.quantile(combined, 0.99) / 5.0) * 5.0)
+    start = float(min(0.0, np.floor(combined.min() / 5.0) * 5.0))
+    x_hist = x_hist[x_hist <= cap]
+    x_pref = x_pref[x_pref <= cap]
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=x_hist,
+        name=f"Historical ({x_hist.size} invoices)",
+        xbins={"start": start, "end": cap, "size": 5},
+        histnorm="percent",
+        opacity=0.6,
+        marker={"color": "#3459e6", "line": {"color": "#d8deea", "width": 1}},
+        hovertemplate=f"{metric}: %{{x}} days<br>Historical: %{{y:.1f}}%<extra></extra>"
+    ))
+    fig.add_trace(go.Histogram(
+        x=x_pref,
+        name=f"Preference ({x_pref.size} invoices)",
+        xbins={"start": start, "end": cap, "size": 5},
+        histnorm="percent",
+        opacity=0.6,
+        marker={"color": "#e6531f", "line": {"color": "#f5d6c6", "width": 1}},
+        hovertemplate=f"{metric}: %{{x}} days<br>Preference: %{{y:.1f}}%<extra></extra>"
+    ))
+    fig.update_layout(barmode="overlay")
+    return _apply_distribution_style(
+        fig,
+        f"{metric} Distribution — Historical vs Preference",
+        f"{metric} (days)",
+        "Percent of Invoices",
+        x_range=[start, cap],
     )
-    fig.update_yaxes(showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor="#adb5bd")
-    return fig
 
 
 @callback(

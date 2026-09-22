@@ -15,6 +15,7 @@ PAT is in early development and should not be used for real-world use at this po
 - Calculates subsequent new value, including the interplay between ordinary course and new value defenses.
 - Saves state of each case so that OCB ranges and other settings are preserved.
 - Allows for analyzing the ordinary course by DSO (days an invoice is outstanding from the invoice date) or DPD (days an invoice is past due).
+- Graph view allows visual insights into how the historical and preference periods align or diverge.
 - Basic user management and administration.
 - Basic firm management and administration.
 - Can export charts in PDF or Excel for use as exhibits.
