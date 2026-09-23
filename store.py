@@ -361,7 +361,7 @@ def delete_subcase(subcase_id):
 
 
 def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, transferee_name=None,
-                            case_caption=None, **meta_fields):
+                            case_caption=None, adversary_number=None, **meta_fields):
     file_number = (file_number or '').strip()
     if not file_number:
         file_number = next_file_number()
@@ -379,20 +379,41 @@ def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, tran
     if transferee_name is not None and not transferee:
         raise ValueError('Transferee name cannot be blank.')
 
+    # Blank adversary numbers persist as NULL (not '') so the
+    # UNIQUE(main_case_id, adversary_number) constraint never collides
+    # across subcases without an adversary number.
+    adversary = (adversary_number or '').strip() if adversary_number is not None else None
+    if adversary is not None and not adversary:
+        adversary = None
+
     conn = _connect_cases()
     try:
+        # Normalize any legacy '' values; display-identical to NULL.
+        conn.execute("UPDATE subcases SET adversary_number = NULL WHERE adversary_number = ''")
         dup = conn.execute(
             "SELECT id FROM subcases WHERE file_number = ? AND id != ?",
             (file_number, int(subcase_id)),
         ).fetchone()
         if dup:
             raise ValueError(f"A subcase with file number '{file_number}' already exists.")
+        if adversary:
+            dup_adv = conn.execute(
+                "SELECT id FROM subcases WHERE main_case_id = "
+                "(SELECT main_case_id FROM subcases WHERE id = ?) "
+                "AND adversary_number = ? AND id != ?",
+                (int(subcase_id), adversary, int(subcase_id)),
+            ).fetchone()
+            if dup_adv:
+                raise ValueError(f"A subcase with adversary number '{adversary}' already exists.")
         current = conn.execute(
             "SELECT s.transferee_name, s.case_caption, m.client_name "
             "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
             "WHERE s.id = ?", (int(subcase_id),)).fetchone()
         set_parts = ["file_number = ?", "filing_date = ?", "meta = ?"]
         vals = [file_number, filing_date, json.dumps(meta_fields)]
+        if adversary_number is not None:
+            set_parts.append("adversary_number = ?")
+            vals.append(adversary)
         if transferee is not None:
             set_parts.append("transferee_name = ?")
             vals.append(transferee)

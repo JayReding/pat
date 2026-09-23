@@ -124,7 +124,7 @@ def _display_number(info):
     return info.get("file_number") or ""
 
 
-def _draw_footer(left, center):
+def _draw_footer(left, center, page_no=None):
     page_w, page_h = landscape(letter)
 
     def draw(canvas, doc):
@@ -135,7 +135,9 @@ def _draw_footer(left, center):
         canvas.line(0.5 * inch, 0.62 * inch, page_w - 0.5 * inch, 0.62 * inch)
         canvas.drawString(0.5 * inch, 0.4 * inch, left)
         canvas.drawCentredString(page_w / 2.0, 0.4 * inch, center)
-        canvas.drawRightString(page_w - 0.5 * inch, 0.4 * inch, f"Page {canvas.getPageNumber()}")
+        canvas.drawRightString(
+            page_w - 0.5 * inch, 0.4 * inch,
+            f"Page {page_no if page_no is not None else canvas.getPageNumber()}")
         canvas.restoreState()
 
     return draw
@@ -459,6 +461,10 @@ def build_graph_pdf(info, png_bytes, bins_df, metric, caption="Graph View",
         _exhibit_footer_center(number, caption, exhibit_label))
 
 
+def _blank_page(canvas, doc):
+    """Page function that draws nothing (footer-free divider pages)."""
+
+
 def build_label_divider(label):
     """Full-page divider flowables announcing one exhibit ('EXHIBIT A')."""
     label_style = ParagraphStyle(
@@ -476,41 +482,49 @@ def build_combined_pdf(info, sections, title="Exhibits"):
     sections: list of dicts with keys ``label`` (or None), ``caption``,
     ``story`` (flowables), and ``footer_center``.  Labeled sections are
     preceded by a full-page divider; unlabeled sections concatenate bare.
-    Page numbering runs continuously across the whole document.
+    Each exhibit is paginated separately: divider pages carry no footer and
+    are uncounted, and every exhibit's content restarts at page 1.
     """
     transferee = (info.get("transferee") or "").strip()
-    number = _display_number(info).strip()
 
-    page_w, page_h = landscape(letter)
-    frame = Frame(0.5 * inch, 0.75 * inch,
-                  page_w - 1.0 * inch, page_h - 1.25 * inch,
-                  id="exhibit-frame")
+    def _frame(fid):
+        page_w, page_h = landscape(letter)
+        return Frame(0.5 * inch, 0.75 * inch,
+                     page_w - 1.0 * inch, page_h - 1.25 * inch, id=fid)
 
-    templates = [PageTemplate(
-        id="divider",
-        frames=[frame],
-        onPage=_draw_footer(transferee, f"{number}  |  {title}"))]
-    for i, sec in enumerate(sections):
-        templates.append(PageTemplate(
-            id=f"sec-{i}",
-            frames=[Frame(0.5 * inch, 0.75 * inch,
-                          page_w - 1.0 * inch, page_h - 1.25 * inch,
-                          id=f"exhibit-frame-{i}")],
-            onPage=_draw_footer(transferee, sec["footer_center"])))
+    page_counts = {}
 
-    story = []
+    def _section_footer(key, center):
+        def draw(canvas, doc):
+            page_counts[key] = page_counts.get(key, 0) + 1
+            _draw_footer(transferee, center, page_no=page_counts[key])(canvas, doc)
+        return draw
+
+    # NextPageTemplate takes effect on pages created *after* it is processed,
+    # so each chunk is preceded by [NextPageTemplate, PageBreak]: the break
+    # ends the old page and the fresh page picks up the new template.  The
+    # first chunk rides on templates[0], which is built in first-use order.
+    chunks = []
     for i, sec in enumerate(sections):
         if sec.get("label"):
-            story += [NextPageTemplate("divider"),
-                      *build_label_divider(sec["label"]),
-                      PageBreak(),
-                      NextPageTemplate(f"sec-{i}")]
-        else:
-            story += [NextPageTemplate(f"sec-{i}")]
-        story += sec["story"]
-        story.append(PageBreak())
-    if story and isinstance(story[-1], PageBreak):
-        story.pop()
+            chunks.append(("divider", _blank_page,
+                           build_label_divider(sec["label"])))
+        chunks.append((f"sec-{i}",
+                       _section_footer(f"sec-{i}", sec["footer_center"]),
+                       sec["story"]))
+
+    templates = []
+    seen = set()
+    for tid, onpage, _flows in chunks:
+        if tid not in seen:
+            seen.add(tid)
+            templates.append(PageTemplate(id=tid, frames=[_frame(tid)], onPage=onpage))
+
+    story = []
+    for ci, (tid, _onpage, flows) in enumerate(chunks):
+        if ci > 0:
+            story += [NextPageTemplate(tid), PageBreak()]
+        story += flows
 
     buf = BytesIO()
     doc = BaseDocTemplate(
