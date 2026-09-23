@@ -281,9 +281,11 @@ def _calculate_weighted_fields(record):
     Weighted Days Past Due = Invoice Amount Paid x (Payment Date - Invoice
     Due); Weighted Invoice to Payment = Invoice Amount Paid x (Payment Date
     - Invoice Date).  A blank Invoice Amount Paid defaults to the Invoice
-    Amount.  Unpaid rows (or rows with missing dates) keep NULLs.
+    Amount.  Unpaid rows always keep Invoice Amount Paid NULL (along with
+    NULL weighted fields); rows with missing dates keep NULLs.
     """
     if record.get("Unpaid") == 1:
+        record["Invoice Amount Paid"] = None
         return
     if record.get("Invoice Amount Paid") is None:
         record["Invoice Amount Paid"] = record.get("Invoice Amount")

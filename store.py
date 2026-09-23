@@ -34,10 +34,13 @@ def _migrate_invoice_paid_columns(conn):
 
     - ``WDPD`` -> ``Weighted Days Past Due``,
       ``WI2DEL`` -> ``Weighted Invoice to Payment`` (schema-only renames).
-    - Adds ``Invoice Amount Paid`` and backfills it from ``Invoice Amount``.
+    - Adds ``Invoice Amount Paid`` and backfills it from ``Invoice Amount``
+      for paid rows; unpaid rows always keep it NULL.
     - Recomputes both weighted columns from anchor dates on the paid-amount
       basis so existing rows match the import math; rows with missing dates
       yield NULL.
+    - Enforces ``Invoice Amount Paid IS NULL`` on unpaid rows on every run
+      (cheap, idempotent), correcting databases migrated before that rule.
     """
     cols = {row[1] for row in conn.execute("PRAGMA table_info(invoice_records)").fetchall()}
     renamed = False
@@ -55,7 +58,7 @@ def _migrate_invoice_paid_columns(conn):
     if renamed or added:
         conn.execute(
             'UPDATE invoice_records SET "Invoice Amount Paid" = "Invoice Amount" '
-            'WHERE "Invoice Amount Paid" IS NULL')
+            'WHERE "Invoice Amount Paid" IS NULL AND "Unpaid" != 1')
         conn.execute(
             '''UPDATE invoice_records
                SET "Weighted Days Past Due" = ROUND(
@@ -63,6 +66,8 @@ def _migrate_invoice_paid_columns(conn):
                    "Weighted Invoice to Payment" = ROUND(
                        "Invoice Amount Paid" * (julianday("Payment Date") - julianday("Invoice Date")), 2)
                WHERE "Unpaid" != 1''')
+    conn.execute(
+        'UPDATE invoice_records SET "Invoice Amount Paid" = NULL WHERE "Unpaid" = 1')
     conn.commit()
 
 

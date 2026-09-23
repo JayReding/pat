@@ -80,10 +80,11 @@ def copy_legacy_rows(conn, subcase_id):
     prepared = []
     for row in rows:
         get = lambda c: row[idx[c]]
+        unpaid = get('Unpaid') == 1
         prepared.append((
             subcase_id,
             get('Transfer Number'), get('Transfer Amount'), get('Invoice Number'), get('Invoice Amount'),
-            get('Invoice Amount'),
+            None if unpaid else get('Invoice Amount'),
             get('Check Amount'), get('Payment Date'), get('Invoice Date'), get('Invoice Due'),
             get('Terms Days'), as_whole_days(get('Days Past Due')), get('WDPD'), get('Invoice to Payment'),
             get('WI2DEL'), get('Age'), get('Unpaid'), get('Check Date'),
@@ -126,12 +127,13 @@ def insert_synthetic_rows(conn, subcase_id, offset):
         get = lambda c: row[idx[c]]
         transfer = get('Transfer Number')
         invoice = get('Invoice Number')
+        unpaid = get('Unpaid') == 1
         new_row = [
             'TT' + transfer[2:] if isinstance(transfer, str) and transfer.startswith('TR') else transfer,
             get('Transfer Amount'),
             '20' + invoice[2:] if isinstance(invoice, str) and len(invoice) > 2 else invoice,
             get('Invoice Amount'),
-            get('Invoice Amount'),
+            None if unpaid else get('Invoice Amount'),
             get('Check Amount'),
             shift_dates(get('Payment Date'), offset),
             shift_dates(get('Invoice Date'), offset),

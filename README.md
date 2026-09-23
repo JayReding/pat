@@ -19,6 +19,7 @@ PAT is in early development and should not be used for real-world use at this po
 - Basic user management and administration.
 - Basic firm management and administration.
 - Can export charts in PDF or Excel for use as exhibits.
+- Exhibits page bundles selected analysis views into a ZIP of shareable PDFs.
 - Authorized users can back up and restore by main case or individual subcases.
 - Testing functions using randomized data with user-settable scenarios.
 

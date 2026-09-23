@@ -102,6 +102,48 @@
     }
 }
 
+/* Exhibits reorderable rows (drag-and-drop + arrow fallback) */
+.exhibit-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.4rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.5rem;
+    background-color: var(--bs-tertiary-bg);
+}
+
+.exhibit-grip {
+    cursor: grab;
+    color: var(--bs-secondary-color);
+    padding: 0.25rem 0.35rem;
+}
+
+.exhibit-grip:active {
+    cursor: grabbing;
+}
+
+.exhibit-name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.exhibit-letter {
+    font-weight: 700;
+    min-width: 1.25rem;
+    text-align: center;
+    color: var(--bs-primary);
+}
+
+.exhibit-row-dragging {
+    opacity: 0.4;
+}
+
+.exhibit-drop-before {
+    box-shadow: 0 -3px 0 0 var(--bs-primary);
+}
+
 /* Avatar color picker swatches */
 .avatar-swatch {
     width: 34px;

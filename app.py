@@ -4,7 +4,7 @@ import os
 import re
 import secrets
 from werkzeug.security import check_password_hash, generate_password_hash
-from dash import Dash, html, dcc, callback, Output, Input, State, ALL
+from dash import Dash, html, dcc, callback, clientside_callback, Output, Input, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 import dash
 import dash_ag_grid as dag
@@ -275,13 +275,14 @@ _ANALYSIS_VIEWS = [
     ("historical", "Historical Period", "fa-solid fa-clock-rotate-left"),
     ("preference", "Preference Period", "fa-solid fa-calendar-days"),
     ("graph", "Graph View", "fa-solid fa-chart-column"),
+    ("exhibits", "Exhibits", "fa-solid fa-file-pdf"),
     ("new-value", "New Value", "fa-solid fa-hand-holding-dollar"),
     ("ocb", "Ordinary Course", "fa-solid fa-chart-line"),
 ]
 
 
 def _content_footer():
-    return html.Div("Preference Analysis Tool (PAT) - \u00a92026 Jay Reding",
+    return html.Div("Preference Analysis Tool (PAT) - \u00a92026 Jay Reding - PAT is not intended to provide legal or financial advice.",
                     className="content-footer")
 
 
@@ -300,16 +301,32 @@ def _main_sidebar(active):
     ``active == "analysis"`` renders the in-page view-switcher links;
     ``active == "portfolio"`` renders the identical sidebar but the analysis
     links become plain navigation back to the analysis page.
+
+    Graph View lives under its own "Presentation" heading: it stays in
+    _ANALYSIS_VIEWS (so view-switching is untouched) but its link is
+    partitioned out of the Analysis section.  The Presentation section is
+    ungated, so it is available to all roles.
     """
+    presentation_keys = {"graph", "exhibits"}
     if active == "analysis":
-        analysis_links = [_analysis_nav_link(v, lab, ico) for v, lab, ico in _ANALYSIS_VIEWS]
+        analysis_links = [_analysis_nav_link(v, lab, ico)
+                          for v, lab, ico in _ANALYSIS_VIEWS if v not in presentation_keys]
+        presentation_links = [_analysis_nav_link(v, lab, ico)
+                              for v, lab, ico in _ANALYSIS_VIEWS if v in presentation_keys]
     else:
         analysis_links = [
             dbc.NavLink(
                 [html.I(className=f"{ico} fa-fw me-3"), lab],
                 href="/", className="analysis-nav-link",
             )
-            for _, lab, ico in _ANALYSIS_VIEWS
+            for v, lab, ico in _ANALYSIS_VIEWS if v not in presentation_keys
+        ]
+        presentation_links = [
+            dbc.NavLink(
+                [html.I(className=f"{ico} fa-fw me-3"), lab],
+                href="/", className="analysis-nav-link",
+            )
+            for v, lab, ico in _ANALYSIS_VIEWS if v in presentation_keys
         ]
     if active == "portfolio":
         portfolio_link = dbc.NavLink(
@@ -324,6 +341,9 @@ def _main_sidebar(active):
     return html.Aside(className="navbar navbar-dark bg-dark analysis-sidebar", children=[
         html.Div("Analysis", className="analysis-sidebar-heading"),
         dbc.Nav(analysis_links, vertical=True, className="navbar-nav w-100"),
+        html.Hr(className="analysis-sidebar-divider"),
+        html.Div("Presentation", className="analysis-sidebar-heading"),
+        dbc.Nav(presentation_links, vertical=True, className="navbar-nav w-100"),
         html.Hr(className="analysis-sidebar-divider"),
         html.Div(id="portfolio-nav-section", style={"display": "none"}, children=[
             html.Div("Portfolio", className="analysis-sidebar-heading"),
@@ -545,6 +565,39 @@ html.Div(children=[
             figure={},
             config={"displaylogo": False, "responsive": True}
         ),
+    ]),
+    html.Div(id="view-exhibits", style={"display": "none"}, children=[
+        html.H3(children='Exhibits'),
+        html.P('Drag rows to order the exhibits (or use the arrows), toggle '
+               'inclusion, and edit exhibit labels. Then generate a ZIP of '
+               'individual PDFs or a single combined PDF.',
+               className="text-muted"),
+        dcc.Store(id="exhibits-order",
+                  data=["transfers", "historical", "preference",
+                        "new-value", "ocb", "graph-view"]),
+        dcc.Store(id="exhibits-include", data={}),
+        dcc.Store(id="exhibits-dnd-ready", data=0),
+        html.Div(id="exhibits-rows", className="mb-3"),
+        html.Div(className="mb-3", style={"maxWidth": "340px"}, children=[
+            dbc.Switch(id="exhibits-labels-toggle",
+                       label="Exhibit labels (A, B, C…)",
+                       value=True,
+                       className="form-switch"),
+            html.Small("When on, each exhibit gets a full-page label in the "
+                       "combined PDF and its letter in every title and footer.",
+                       className="text-muted d-block"),
+        ]),
+        html.Div(style={"display": "flex", "gap": "10px", "flexWrap": "wrap"}, children=[
+            dbc.Button([html.I(className="fa-solid fa-file-zipper me-2"),
+                        "Generate Exhibits ZIP"],
+                       id="exhibits-generate-btn", color="primary", n_clicks=0),
+            dcc.Download(id="download-exhibits-zip"),
+            dbc.Button([html.I(className="fa-solid fa-file-pdf me-2"),
+                        "Generate Combined PDF"],
+                       id="exhibits-combined-btn", color="secondary", n_clicks=0),
+            dcc.Download(id="download-exhibits-combined"),
+        ]),
+        html.Div(id="exhibits-status", className="mt-3"),
     ]),
     html.Div(id="view-new-value", style={"display": "none"}, children=[
             dag.AgGrid(
@@ -2192,24 +2245,25 @@ def update_pref_distribution(rowData):
     )
 
 
-@callback(
-    Output("graph-distribution-graph", "figure"),
-    Input("historical", "rowData"),
-    Input("preference", "rowData"),
-    Input("graph-metric", "value"),
-)
-def update_graph_distribution(hist_rowData, pref_rowData, metric):
+def build_overlay_figure(hist_df, pref_df, metric):
+    """Overlaid Historical vs Preference distribution figure + bin table.
+
+    Returns (fig, bins_df); bins_df has GRAPH_BIN_COLUMNS-compatible
+    columns ("Bin", "Historical %", "Preference %", "Historical #",
+    "Preference #") for the Exhibits PDF.  Empty input yields an empty
+    figure and empty table.
+    """
     metric = metric or "Invoice to Payment"
-    hist_df = pd.DataFrame(hist_rowData or [])
-    pref_df = pd.DataFrame(pref_rowData or [])
+    empty_bins = pd.DataFrame(columns=["Bin", "Historical %", "Preference %",
+                                       "Historical #", "Preference #"])
     if metric not in hist_df.columns and metric not in pref_df.columns:
-        return go.Figure()
+        return go.Figure(), empty_bins
     x_hist = (hist_df[metric].dropna().to_numpy(dtype=float)
               if metric in hist_df.columns else np.array([]))
     x_pref = (pref_df[metric].dropna().to_numpy(dtype=float)
               if metric in pref_df.columns else np.array([]))
     if x_hist.size == 0 and x_pref.size == 0:
-        return go.Figure()
+        return go.Figure(), empty_bins
     # Shared bins so the two periods are directly comparable: cap covers
     # the 99th percentile of both periods; start accommodates negatives
     # (e.g. Days Past Due paid early).
@@ -2238,13 +2292,39 @@ def update_graph_distribution(hist_rowData, pref_rowData, metric):
         hovertemplate=f"{metric}: %{{x}} days<br>Preference: %{{y:.1f}}%<extra></extra>"
     ))
     fig.update_layout(barmode="overlay")
-    return _apply_distribution_style(
+    fig = _apply_distribution_style(
         fig,
         f"{metric} Distribution — Historical vs Preference",
         f"{metric} (days)",
         "Percent of Invoices",
         x_range=[start, cap],
     )
+    edges = np.arange(start, cap + 5, 5)
+    hist_counts, _ = np.histogram(x_hist, bins=edges)
+    pref_counts, _ = np.histogram(x_pref, bins=edges)
+    bins_df = pd.DataFrame([{
+        "Bin": f"{edges[i]:.0f}–{edges[i + 1]:.0f}",
+        "Historical %": round(float(hist_counts[i]) / max(len(x_hist), 1) * 100, 1),
+        "Preference %": round(float(pref_counts[i]) / max(len(x_pref), 1) * 100, 1),
+        "Historical #": int(hist_counts[i]),
+        "Preference #": int(pref_counts[i]),
+    } for i in range(len(edges) - 1)])
+    return fig, bins_df
+
+
+@callback(
+    Output("graph-distribution-graph", "figure"),
+    Input("historical", "rowData"),
+    Input("preference", "rowData"),
+    Input("graph-metric", "value"),
+)
+def update_graph_distribution(hist_rowData, pref_rowData, metric):
+    fig, _ = build_overlay_figure(
+        pd.DataFrame(hist_rowData or []),
+        pd.DataFrame(pref_rowData or []),
+        metric,
+    )
+    return fig
 
 
 @callback(
@@ -2387,6 +2467,417 @@ def export_ocb_excel(n_clicks, row_data, ocb_range, start, end, step):
     rows, summary = _ocb_summary_and_rows(st, ocb_range, start, end, step)
     excel_bytes = export_excel.build_ocb_workbook(df, selected_rows=rows, summary=summary)
     return dcc.send_bytes(lambda buf: buf.write(excel_bytes), f"{safe_name}_Ordinary_Course.xlsx")
+
+
+_EXHIBIT_IDS = ("transfers", "historical", "preference", "new-value", "ocb", "graph-view")
+
+_EXHIBIT_TITLES = {
+    "transfers": "Transfers in the Preference Period",
+    "historical": "Historical Period invoices and payments",
+    "preference": "Preference Period invoices and payments",
+    "new-value": "New Value",
+    "ocb": "Ordinary Course",
+    "graph-view": "Graph View",
+}
+
+_EXHIBIT_FILENAMES = {
+    "transfers": "Transfers_Preference_Period.pdf",
+    "historical": "Historical_Period.pdf",
+    "preference": "Preference_Period.pdf",
+    "new-value": "New_Value.pdf",
+    "ocb": "Ordinary_Course.pdf",
+    "graph-view": "Graph_View.pdf",
+}
+
+
+def _sanitize_order(order):
+    """Normalize an order list to a deduped permutation of known exhibit ids."""
+    seen = []
+    for k in (order or []):
+        if k in _EXHIBIT_IDS and k not in seen:
+            seen.append(k)
+    return seen + [k for k in _EXHIBIT_IDS if k not in seen]
+
+
+def reorder_keys(order, key, direction):
+    """Move key one step up/down; returns the new order (pure, testable)."""
+    order = _sanitize_order(order)
+    if key not in order:
+        return order
+    i = order.index(key)
+    j = i - 1 if direction == "up" else i + 1
+    if j < 0 or j >= len(order):
+        return order
+    order[i], order[j] = order[j], order[i]
+    return order
+
+
+def _exhibit_row(key, position_label, included):
+    return html.Div(
+        className="exhibit-row",
+        draggable="true",
+        **{"data-key": key},
+        children=[
+            html.Span(html.I(className="fa-solid fa-grip-vertical"),
+                      className="exhibit-grip", title="Drag to reorder"),
+            dbc.Button(html.I(className="fa-solid fa-chevron-up"),
+                       id={"type": "exhibit-up", "key": key},
+                       size="sm", color="secondary", title="Move up"),
+            dbc.Button(html.I(className="fa-solid fa-chevron-down"),
+                       id={"type": "exhibit-down", "key": key},
+                       size="sm", color="secondary", title="Move down"),
+            dbc.Checkbox(id={"type": "exhibit-include", "key": key},
+                         value=bool(included), className="ms-1"),
+            html.Span(position_label, className="exhibit-letter"),
+            html.Span(_EXHIBIT_TITLES[key], className="exhibit-name"),
+        ],
+    )
+
+
+@callback(
+    Output("exhibits-rows", "children"),
+    Input("exhibits-order", "data"),
+    Input("exhibits-include", "data"),
+)
+def render_exhibit_rows(order, include):
+    order = _sanitize_order(order)
+    include = include or {}
+    rows = []
+    pos = 0
+    for k in order:
+        if include.get(k, True):
+            rows.append(_exhibit_row(k, chr(65 + pos), True))
+            pos += 1
+        else:
+            rows.append(_exhibit_row(k, "–", False))
+    return rows
+
+
+@callback(
+    Output("exhibits-order", "data", allow_duplicate=True),
+    Input({"type": "exhibit-up", "key": MATCH}, "n_clicks"),
+    Input({"type": "exhibit-down", "key": MATCH}, "n_clicks"),
+    State("exhibits-order", "data"),
+    prevent_initial_call=True,
+)
+def move_exhibit(up, down, order):
+    trig = dash.callback_context.triggered_id or {}
+    if not trig.get("key"):
+        raise PreventUpdate
+    new_order = reorder_keys(
+        order, trig["key"], "up" if trig.get("type") == "exhibit-up" else "down")
+    if new_order == _sanitize_order(order):
+        raise PreventUpdate
+    return new_order
+
+
+@callback(
+    Output("exhibits-include", "data", allow_duplicate=True),
+    Input({"type": "exhibit-include", "key": ALL}, "value"),
+    State("exhibits-order", "data"),
+    State("exhibits-include", "data"),
+    prevent_initial_call=True,
+)
+def sync_exhibit_include(values, order, current):
+    order = _sanitize_order(order)
+    if not values or len(values) != len(order):
+        raise PreventUpdate
+    new = dict(current or {})
+    for k, v in zip(order, values):
+        new[k] = bool(v)
+    if new == (current or {}):
+        raise PreventUpdate
+    return new
+
+
+clientside_callback(
+    """
+    function(children) {
+        const container = document.getElementById('exhibits-rows');
+        if (!container || container.dataset.dndBound) { return Date.now(); }
+        container.dataset.dndBound = '1';
+        // Firefox may deliver drag/mouse events with a Text node as the
+        // target (which has no .closest); resolve to the parent element.
+        const el = (n) => ((n && n.nodeType === 1) ? n : (n && n.parentElement)) || null;
+        const rowOf = (n) => { const t = el(n); return t ? t.closest('.exhibit-row') : null; };
+        let dragKey = null;
+        container.addEventListener('dragstart', (e) => {
+            const src = el(e.target);
+            const row = rowOf(e.target);
+            // setData first: Firefox requires it during dragstart, and it
+            // must run before any early return that could throw.
+            try {
+                e.dataTransfer.setData('text/plain', (row && row.dataset.key) || '');
+                e.dataTransfer.setData('text', (row && row.dataset.key) || '');
+            } catch (err) {}
+            if (!row || !(src && src.closest('.exhibit-grip'))) { e.preventDefault(); return; }
+            dragKey = row.dataset.key;
+            e.dataTransfer.effectAllowed = 'move';
+            row.classList.add('exhibit-row-dragging');
+        });
+        container.addEventListener('dragend', () => {
+            dragKey = null;
+            container.querySelectorAll('.exhibit-row-dragging').forEach(
+                r => r.classList.remove('exhibit-row-dragging'));
+            container.querySelectorAll('.exhibit-drop-before').forEach(
+                r => r.classList.remove('exhibit-drop-before'));
+        });
+        const allowDrop = (e) => {
+            if (!dragKey) { return false; }
+            e.preventDefault();
+            try { e.dataTransfer.dropEffect = 'move'; } catch (err) {}
+            return true;
+        };
+        container.addEventListener('dragenter', (e) => { allowDrop(e); });
+        container.addEventListener('dragover', (e) => {
+            if (!allowDrop(e)) { return; }
+            const over = rowOf(e.target);
+            container.querySelectorAll('.exhibit-drop-before').forEach(
+                r => { if (r !== over) { r.classList.remove('exhibit-drop-before'); } });
+            if (over && over.dataset.key !== dragKey) { over.classList.add('exhibit-drop-before'); }
+        });
+        container.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const rows = Array.from(container.querySelectorAll('.exhibit-row'));
+            let keys = rows.map(r => r.dataset.key);
+            const target = rowOf(e.target);
+            if (!dragKey || keys.indexOf(dragKey) === -1) { dragKey = null; return; }
+            keys = keys.filter(k => k !== dragKey);
+            if (target && target.dataset.key !== dragKey) {
+                keys.splice(Math.max(keys.indexOf(target.dataset.key), 0), 0, dragKey);
+            } else {
+                keys.push(dragKey);
+            }
+            dragKey = null;
+            dash_clientside.setProps('exhibits-order', {data: keys});
+        });
+        return Date.now();
+    }
+    """,
+    Output("exhibits-dnd-ready", "data"),
+    Input("exhibits-rows", "children"),
+)
+
+
+def _resolve_exhibit_plan(order, include, labels_on):
+    """Sanitized [(key, label_or_None)] for included exhibits.
+
+    Labels recompute from position: the first included exhibit is always
+    A, the second B, and so on, irrespective of exhibit identity or the
+    original ordering.
+    """
+    order = _sanitize_order(order)
+    include = include or {}
+    plan = []
+    pos = 0
+    for k in order:
+        if not include.get(k, True):
+            continue
+        plan.append((k, chr(65 + pos) if labels_on else None))
+        pos += 1
+    return plan
+
+
+def _build_exhibit_specs(st, plan, transfers_rows, hist_rows, pref_rows,
+                         nv_rows, ocb_rows, ocb_range, start, end, step,
+                         ocb_metric, graph_metric):
+    """Build one spec per exhibit: caption/filename/story/footer.
+
+    Returns (specs, skipped).  Raises ValueError when the Graph View chart
+    cannot be rendered.  Shared by the ZIP and combined-PDF paths.
+    """
+    import export_pdf as _epdf
+    transferee = (st.meta.get('transferee') or '').strip()
+    number = _epdf._display_number(st.meta).strip()
+    specs = []
+    skipped = []
+
+    def _table_spec(key, label, caption, filename, df, **kwargs):
+        if df is None or df.empty:
+            skipped.append(key)
+            return
+        labeled = _epdf._labeled_caption(caption, label)
+        specs.append({
+            "key": key,
+            "label": label,
+            "caption": labeled,
+            "filename": filename,
+            "story": _epdf._invoices_story(st.meta, df, labeled, **kwargs),
+            "footer_center": _epdf._exhibit_footer_center(number, caption, label),
+        })
+
+    for key, label in plan:
+        if key == "transfers":
+            _table_spec(key, label, "Transfers in the Preference Period",
+                        "Transfers_Preference_Period.pdf",
+                        pd.DataFrame(transfers_rows or []),
+                        columns=_epdf.TRANSFER_COLUMNS, money={"Transfer Amount"})
+        elif key == "historical":
+            _table_spec(key, label, "Historical Period — Invoices and Payments",
+                        "Historical_Period.pdf", pd.DataFrame(hist_rows or []))
+        elif key == "preference":
+            _table_spec(key, label, "Preference Period — Invoices and Payments",
+                        "Preference_Period.pdf", pd.DataFrame(pref_rows or []))
+        elif key == "new-value":
+            _table_spec(key, label, "New Value", "New_Value.pdf",
+                        pd.DataFrame(nv_rows or []),
+                        columns=_epdf.NEW_VALUE_COLUMNS,
+                        money=_epdf._NEW_VALUE_MONEY)
+        elif key == "ocb":
+            df = pd.DataFrame(ocb_rows or [])
+            if df.empty:
+                skipped.append(key)
+                continue
+            st.ocb_metric = ocb_metric or st.ocb_metric or "Invoice to Payment"
+            sel_rows, summary = _ocb_summary_and_rows(st, ocb_range, start, end, step)
+            caption = "Ordinary Course of Business"
+            labeled = _epdf._labeled_caption(caption, label)
+            specs.append({
+                "key": key,
+                "label": label,
+                "caption": labeled,
+                "filename": "Ordinary_Course.pdf",
+                "story": _epdf._ocb_story(
+                    transferee, number, labeled,
+                    _epdf._ocb_table(df, sel_rows), summary),
+                "footer_center": _epdf._exhibit_footer_center(number, caption, label),
+            })
+        elif key == "graph-view":
+            metric = graph_metric or "Invoice to Payment"
+            fig, bins_df = build_overlay_figure(
+                pd.DataFrame(hist_rows or []), pd.DataFrame(pref_rows or []), metric)
+            if not fig.data:
+                skipped.append(key)
+                continue
+            try:
+                png = fig.to_image(format="png", width=1200, height=600)
+            except Exception as e:
+                raise ValueError(f"Could not render the Graph View chart: {e}")
+            caption = "Graph View"
+            labeled = _epdf._labeled_caption(caption, label)
+            specs.append({
+                "key": key,
+                "label": label,
+                "caption": labeled,
+                "filename": "Graph_View.pdf",
+                "story": _epdf._graph_story(st.meta, png, bins_df, metric, labeled),
+                "footer_center": _epdf._exhibit_footer_center(number, caption, label),
+            })
+    return specs, skipped
+
+
+def _exhibit_status_msg(files, skipped):
+    included = ", ".join(f for _, f in files)
+    msg = f"Generated {len(files)} exhibit(s): {included}."
+    if skipped:
+        msg += f" Skipped (no data): {', '.join(sorted(set(skipped)))}."
+    return dbc.Alert(msg, color="success")
+
+
+def _exhibits_common_inputs():
+    return [
+        State("exhibits-order", "data"),
+        State("exhibits-include", "data"),
+        State("exhibits-labels-toggle", "value"),
+        State("transfers-pref", "rowData"),
+        State("historical", "rowData"),
+        State("preference", "rowData"),
+        State("new_value", "rowData"),
+        State("ocb_grid", "rowData"),
+        State("ocb-range", "data"),
+        State("ocb-start", "value"),
+        State("ocb-end", "value"),
+        State("ocb-step", "value"),
+        State("ocb-metric", "value"),
+        State("graph-metric", "value"),
+    ]
+
+
+@callback(
+    Output("download-exhibits-zip", "data"),
+    Output("exhibits-status", "children"),
+    Input("exhibits-generate-btn", "n_clicks"),
+    *_exhibits_common_inputs(),
+    prevent_initial_call=True
+)
+def generate_exhibits_zip(n_clicks, order, include, labels_on,
+                          transfers_rows, hist_rows, pref_rows, nv_rows,
+                          ocb_rows, ocb_range, start, end, step, ocb_metric,
+                          graph_metric):
+    import re
+    import zipfile
+    from io import BytesIO
+    st = session.get_state()
+    if not st.loaded or st.meta is None:
+        return dash.no_update, dbc.Alert(
+            "Load a subcase before generating exhibits.", color="warning")
+    plan = _resolve_exhibit_plan(order, include, labels_on)
+    if not plan:
+        return dash.no_update, dbc.Alert(
+            "Select at least one exhibit to include.", color="warning")
+    transferee = (st.meta.get('transferee') or '').strip()
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Exhibits'
+    try:
+        specs, skipped = _build_exhibit_specs(
+            st, plan, transfers_rows, hist_rows, pref_rows, nv_rows,
+            ocb_rows, ocb_range, start, end, step, ocb_metric, graph_metric)
+    except ValueError as e:
+        return dash.no_update, dbc.Alert(str(e), color="danger")
+    if not specs:
+        return dash.no_update, dbc.Alert(
+            "Nothing to include — the selected exhibits have no data "
+            "for this subcase.", color="warning")
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for spec in specs:
+            pdf_bytes = export_pdf.build_doc_from_story(
+                st.meta, spec["caption"], spec["story"], spec["footer_center"])
+            zf.writestr(f"{safe_name}_{spec['filename']}", pdf_bytes)
+    zip_bytes = buf.getvalue()
+    files = [(s["key"], f"{safe_name}_{s['filename']}") for s in specs]
+    return (dcc.send_bytes(lambda b: b.write(zip_bytes), f"{safe_name}_Exhibits.zip"),
+            _exhibit_status_msg(files, skipped))
+
+
+@callback(
+    Output("download-exhibits-combined", "data"),
+    Output("exhibits-status", "children"),
+    Input("exhibits-combined-btn", "n_clicks"),
+    *_exhibits_common_inputs(),
+    prevent_initial_call=True
+)
+def generate_exhibits_combined(n_clicks, order, include, labels_on,
+                               transfers_rows, hist_rows, pref_rows, nv_rows,
+                               ocb_rows, ocb_range, start, end, step,
+                               ocb_metric, graph_metric):
+    import re
+    st = session.get_state()
+    if not st.loaded or st.meta is None:
+        return dash.no_update, dbc.Alert(
+            "Load a subcase before generating exhibits.", color="warning")
+    plan = _resolve_exhibit_plan(order, include, labels_on)
+    if not plan:
+        return dash.no_update, dbc.Alert(
+            "Select at least one exhibit to include.", color="warning")
+    transferee = (st.meta.get('transferee') or '').strip()
+    safe_name = re.sub(r'[^A-Za-z0-9_.-]+', '_', transferee) or 'Exhibits'
+    try:
+        specs, skipped = _build_exhibit_specs(
+            st, plan, transfers_rows, hist_rows, pref_rows, nv_rows,
+            ocb_rows, ocb_range, start, end, step, ocb_metric, graph_metric)
+    except ValueError as e:
+        return dash.no_update, dbc.Alert(str(e), color="danger")
+    if not specs:
+        return dash.no_update, dbc.Alert(
+            "Nothing to include — the selected exhibits have no data "
+            "for this subcase.", color="warning")
+    pdf_bytes = export_pdf.build_combined_pdf(
+        st.meta,
+        [{"label": s["label"], "caption": s["caption"], "story": s["story"],
+          "footer_center": s["footer_center"]} for s in specs])
+    files = [(s["key"], s["caption"]) for s in specs]
+    return (dcc.send_bytes(lambda b: b.write(pdf_bytes), f"{safe_name}_Exhibits.pdf"),
+            _exhibit_status_msg(files, skipped))
 
 
 @callback(
