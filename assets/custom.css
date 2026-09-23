@@ -47,6 +47,12 @@
     margin-top: 2rem;
 }
 
+/* The Portfolio heading is wrapped for role-gating, so :not(:first-child)
+   never matches it — give it the same top margin as the other headings. */
+#portfolio-nav-section > .analysis-sidebar-heading:first-child {
+    margin-top: 2rem;
+}
+
 .analysis-sidebar-divider {
     border-color: rgba(255, 255, 255, 0.2);
     opacity: 1;
