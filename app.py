@@ -2016,6 +2016,9 @@ def _load_subcase_payload(st, subcase_id):
         {'range': info['ocb_range'], 'start': info['ocb_start'], 'end': info['ocb_end'],
          'step': info['ocb_step'], 'total': info['ocb_total_flag']},
         st.ocb_metric,
+        # Restored range is output directly (not only via ocb-restore) so a
+        # trailing autosave can never persist the previous case's range.
+        info['ocb_range'],
     )
 
 
@@ -2029,6 +2032,7 @@ def _load_subcase_payload(st, subcase_id):
     Output("ocb_grid", "rowData", allow_duplicate=True),
     Output("ocb-restore", "data"),
     Output("ocb-metric", "value", allow_duplicate=True),
+    Output("ocb-range", "data", allow_duplicate=True),
     Input("main-selector", "value"),
     Input("subcase-selector", "value"),
     prevent_initial_call=True
@@ -2043,7 +2047,7 @@ def selection_changed(main_id, subcase_id):
         st = session.get_state()
         sub_ids = {o["value"] for o in opts}
         if st.meta and st.meta.get("main_id") == main_id and st.active_subcase_id in sub_ids:
-            return (no_update,) * 9
+            return (no_update,) * 10
         if st.subcase_by_main is None:
             st.subcase_by_main = {}
         target = st.subcase_by_main.get(main_id)
@@ -2051,7 +2055,7 @@ def selection_changed(main_id, subcase_id):
             target = opts[0]["value"] if opts else None
         if target is None:
             return opts, None, no_update, no_update, no_update, \
-                   no_update, no_update, no_update, no_update
+                   no_update, no_update, no_update, no_update, no_update
         st.subcase_by_main[main_id] = target
         payload = _load_subcase_payload(st, target)
         return (opts, target) + payload
@@ -2061,7 +2065,7 @@ def selection_changed(main_id, subcase_id):
 
     st = session.get_state()
     if st.meta and st.meta.get("subcase_id") == subcase_id:
-        return (no_update,) * 9
+        return (no_update,) * 10
     if st.subcase_by_main is None:
         st.subcase_by_main = {}
     st.subcase_by_main[main_id] = subcase_id
@@ -3033,6 +3037,11 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
     st = session.get_state()
     auth.guard_edit_subcase(st.active_subcase_id)
     from datetime import datetime
+    # A mid-gesture range (start clicked, end not yet) must never be
+    # persisted: the loader discards end-less ranges, so saving one would
+    # read back as a reset.  Normalize to an explicit clear instead.
+    if ocb_range is not None and ocb_range.get("end") is None:
+        ocb_range = None
     nv_settings = []
     for row in nv_rowData or []:
         inv = row.get("Invoice Number")
@@ -3046,7 +3055,13 @@ def autosave_settings(ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, n
                 'reason': reason or None,
             })
     store.save_case_settings(st.active_subcase_id, ocb_range, ocb_start, ocb_end, ocb_step, ocb_total_flag, nv_settings, ocb_metric)
-    return f"Saved {datetime.now().strftime('%H:%M:%S')}"
+    if ocb_range is not None and ocb_range.get("end") is not None:
+        a, b = sorted((int(ocb_range["start"]), int(ocb_range["end"])))
+        range_desc = f"range rows {a}–{b}"
+    else:
+        range_desc = "range none"
+    return (f"Saved {datetime.now().strftime('%H:%M:%S')} · "
+            f"subcase {st.active_subcase_id} · {range_desc}")
 
 
 @callback(
