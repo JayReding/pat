@@ -32,7 +32,7 @@ PAT is in early development and should not be used for real-world use at this po
 
 **Installation and Running**
 
-Requires Python 3.11 or newer (developed and tested on Python 3.14).
+Requires Python 3.11 or newer (developed and tested on Python 3.14). The server will also need Chrome or Chromium for rendering the PDF exhbits. A headless version will work.
 
 ```bash
 python3 -m venv .venv
@@ -48,7 +48,7 @@ Then open http://127.0.0.1:8050 in a browser.
 *Notes:*
 - The SQLite databases (`pat_cases.db`, `pat_state.db`, `pat_users.db`) are created automatically on first run.
 - The data files `courts.json` and `states.json` must stay in the same directory as `app.py`.
-- The web UI loads the Bootswatch theme, Font Awesome, and Dash ag-grid JavaScript from a CDN at runtime, so internet access is needed unless those assets are vendored locally.
+- The web UI loads the Bootswatch theme, Font Awesome, and Dash ag-grid JavaScript from a CDN at runtime, so internet access is needed unless those assets are served locally.
 
 
 PAT is written in Python using the Dash library and should run on any platform that supports Python and Dash.
