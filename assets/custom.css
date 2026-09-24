@@ -49,7 +49,7 @@
 
 /* The Portfolio heading is wrapped for role-gating, so :not(:first-child)
    never matches it — give it the same top margin as the other headings. */
-#portfolio-nav-section > .analysis-sidebar-heading:first-child {
+.analysis-sidebar div > .analysis-sidebar-heading:first-child {
     margin-top: 2rem;
 }
 

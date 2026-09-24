@@ -778,6 +778,9 @@ def _settings_nav_link(key, label, href, icon, nav_id, gated, active):
 
 
 def _settings_sidebar(active):
+    # Mirrors the analysis sidebar rhythm (heading / nav / divider), with
+    # each divider inside its section block so hidden sections take their
+    # dividers with them and never leave strays or doubles.
     sections = []
     for heading, links in _SETTINGS_LINKS:
         block = [
@@ -787,6 +790,7 @@ def _settings_sidebar(active):
                  for k, lab, href, ico, nid, gated in links],
                 vertical=True, className="navbar-nav w-100",
             ),
+            html.Hr(className="analysis-sidebar-divider"),
         ]
         if heading == "Administration":
             # Hidden until manage_admin_gate reveals it; keeps regular
@@ -807,7 +811,6 @@ def _settings_sidebar(active):
         else:
             sections.extend(block)
     sections.append(html.Div(className="mt-auto", children=[
-        html.Hr(className="analysis-sidebar-divider"),
         dbc.Nav(
             [dbc.NavLink(
                 [html.I(className="fa-solid fa-arrow-left fa-fw me-3"), "Back to Analysis"],
