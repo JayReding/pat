@@ -941,41 +941,58 @@ _make_firm_options("td", "td-main")
 def _maincase_page():
     return _settings_chrome("main",
         dcc.Store(id="manage-boot", data=True),
-                html.Div(className="d-flex justify-content-between align-items-center mb-3", children=[
-                    html.H3(children='Main Case Management', style={"margin": 0}),
-                ]),
-                _firm_picker("cm"),
-                dcc.Dropdown(id="cm-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
-                html.Div(id="cm-new", children=[
-                    dbc.Button("New Main Case", id="cm-new-btn", n_clicks=0, color="secondary"),
-                ]),
-                html.Div(id="cm-status", className="mb-3"),
-                _cm_field('Case Name', "cm-case-name"),
-                _cm_field('Case Number', "cm-case-number"),
-                html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
-                    html.Label('Jurisdiction', htmlFor="cm-jurisdiction", style={"fontWeight": "600"}),
-                    dcc.Dropdown(id="cm-jurisdiction", options=COURT_OPTIONS, clearable=False, searchable=True,
-                                 style={"height": "50px", "fontSize": "1rem"}),
-                ]),
-                _cm_field('Judge', "cm-judge"),
-                _cm_field('Petition Date (YYYY-MM-DD)', "cm-petition-date", "date"),
-                html.Hr(style={"margin": "20px 0"}),
-                html.Label('Client Information', style={"fontWeight": "600", "display": "block", "marginBottom": "12px"}),
-                _cm_field('Client Name', "cm-client-name"),
-                _cm_field('Client Contact', "cm-client-contact"),
-                _cm_field('Client Address 1', "cm-client-address"),
-                _cm_field('Client Address 2', "cm-client-address2"),
-                html.Div(className="d-flex", style={"gap": "8px", "maxWidth": "640px"}, children=[
-                    html.Div(style={"flex": "1 1 0"}, children=[_cm_field('City', "cm-client-city")]),
-                    html.Div(style={"flex": "1 1 0"}, children=[
-                        _cm_state_field('State', "cm-client-state", "cm-client-state-custom", "cm-client-state-custom-wrap",
-                                        options=_state_options_for(_db_custom_states_main()))
+                html.H3(children='Edit Main Cases'),
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Select Case", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        _firm_picker("cm"),
+                        html.Label('Main Bankruptcy Case', htmlFor="cm-main",
+                                   style={"fontWeight": "600"}),
+                        dcc.Dropdown(id="cm-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                        html.Div(id="cm-new", children=[
+                            dbc.Button("New Main Case", id="cm-new-btn", n_clicks=0, color="secondary"),
+                        ]),
                     ]),
-                    html.Div(style={"flex": "1 1 0"}, children=[_cm_field('ZIP', "cm-client-zip")]),
                 ]),
-                _cm_field('Client Phone', "cm-client-phone"),
-                _cm_field('Client Email', "cm-client-email", "email"),
-                dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary", className="mt-2"),
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Main Case Details", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        _cm_field('Case Name', "cm-case-name"),
+                        _cm_field('Case Number', "cm-case-number"),
+                        html.Div(className="mb-2", style={"maxWidth": "640px"}, children=[
+                            html.Label('Jurisdiction', htmlFor="cm-jurisdiction", style={"fontWeight": "600"}),
+                            dcc.Dropdown(id="cm-jurisdiction", options=COURT_OPTIONS, clearable=False, searchable=True,
+                                         style={"height": "50px", "fontSize": "1rem"}),
+                        ]),
+                        _cm_field('Judge', "cm-judge"),
+                        _cm_field('Petition Date (YYYY-MM-DD)', "cm-petition-date", "date"),
+                    ]),
+                ]),
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Client Information", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        _cm_field('Client Name', "cm-client-name"),
+                        _cm_field('Client Contact', "cm-client-contact"),
+                        _cm_field('Client Address 1', "cm-client-address"),
+                        _cm_field('Client Address 2', "cm-client-address2"),
+                        html.Div(className="d-flex", style={"gap": "8px", "maxWidth": "640px"}, children=[
+                            html.Div(style={"flex": "1 1 0"}, children=[_cm_field('City', "cm-client-city")]),
+                            html.Div(style={"flex": "1 1 0"}, children=[
+                                _cm_state_field('State', "cm-client-state", "cm-client-state-custom", "cm-client-state-custom-wrap",
+                                                options=_state_options_for(_db_custom_states_main()))
+                            ]),
+                            html.Div(style={"flex": "1 1 0"}, children=[_cm_field('ZIP', "cm-client-zip")]),
+                        ]),
+                        html.Div(className="d-flex flex-wrap gap-2", children=[
+                            html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Client Phone', "cm-client-phone")]),
+                            html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Client Email', "cm-client-email", "email")]),
+                        ]),
+                    ]),
+                ]),
+                html.Div(id="cm-status", className="mt-3"),
+                html.Div(className="sticky-action-bar", children=[
+                    dbc.Button("Save Changes", id="cm-save", n_clicks=0, color="primary"),
+                ]),
                 dcc.Store(id="cm-create-mode", data=False),
     )
 
@@ -983,69 +1000,97 @@ def _maincase_page():
 def _subcase_page():
     return _settings_chrome("subcase",
         dcc.Store(id="manage-boot", data=True),
-                html.H3(children='Subcase Management'),
-                _firm_picker("sc"),
-                dcc.Dropdown(id="sc-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
-                dbc.Button("New Subcase", id="sc-new-subcase-btn", n_clicks=0, color="success",
-                           style={"display": "none", "marginBottom": "8px"}),
-                html.H5('Subcase Details', className="mt-3"),
-                dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
-                _cm_field('Transferee Name', "sc-transferee-name"),
-                _cm_field('Case Caption', "sc-case-caption"),
-                _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
-                _cm_field('Adversary Number (blank = none)', "sc-adversary-number"),
-                _cm_field('Filing Date (YYYY-MM-DD)', "sc-filing-date", "date"),
-                html.H6('Contact', className="mt-3"),
-                _cm_field('Contact Name', "sc-contact-name"),
-                _cm_field('Contact Address', "sc-contact-address"),
-                _cm_field('Contact Address 2', "sc-contact-address2"),
-                html.Div(className="d-flex flex-wrap gap-2", children=[
-                    _cm_field('City', "sc-contact-city"),
-                    _cm_state_field('State', "sc-contact-state", "sc-contact-state-custom", "sc-contact-state-custom-wrap"),
-                    _cm_field('ZIP', "sc-contact-zip"),
-                ]),
-                _cm_field('Contact Phone', "sc-contact-phone"),
-                _cm_field('Contact Email', "sc-contact-email", "email"),
-                dbc.Row([
-                    dbc.Col(width=6, children=[
-                        html.H4('Attorney', className="mt-3"),
-                        html.Div(className="ps-4", children=[
-                            _cm_field('Attorney Name', "sc-attorney-name"),
-                            _cm_field('Attorney Firm', "sc-attorney-firm"),
-                            _cm_field('Attorney Address', "sc-attorney-address"),
-                            _cm_field('Attorney Address 2', "sc-attorney-address2"),
-                            html.Div(className="d-flex flex-wrap gap-2", children=[
-                                _cm_field('City', "sc-attorney-city"),
-                                _cm_state_field('State', "sc-attorney-state", "sc-attorney-state-custom", "sc-attorney-state-custom-wrap"),
-                                _cm_field('ZIP', "sc-attorney-zip"),
-                            ]),
-                            _cm_field('Attorney Phone', "sc-attorney-phone"),
-                            _cm_field('Attorney Email', "sc-attorney-email", "email"),
-                        ]),
+                html.H3(children='Edit Subcases'),
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Select Case", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        _firm_picker("sc"),
+                        html.Label('Main Bankruptcy Case', htmlFor="sc-main",
+                                   style={"fontWeight": "600"}),
+                        dcc.Dropdown(id="sc-main", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                        html.Label('Subcase', htmlFor="sc-subcase",
+                                   style={"fontWeight": "600"}),
+                        dcc.Dropdown(id="sc-subcase", options=[], clearable=False, style={"maxWidth": "640px", "marginBottom": "16px"}),
+                        dbc.Button("New Subcase", id="sc-new-subcase-btn", n_clicks=0, color="success",
+                                   style={"display": "none", "marginBottom": "8px"}),
                     ]),
-                    dbc.Col(width=6, children=[
-                        html.H4('Local Counsel', className="mt-3"),
-                        html.Div(className="ps-4", children=[
-                            _cm_field('Local Counsel Name', "sc-local-counsel-name"),
-                            _cm_field('Local Counsel Firm', "sc-local-counsel-firm"),
-                            _cm_field('Local Counsel Address', "sc-local-counsel-address"),
-                            _cm_field('Local Counsel Address 2', "sc-local-counsel-address2"),
-                            html.Div(className="d-flex flex-wrap gap-2", children=[
-                                _cm_field('City', "sc-local-counsel-city"),
-                                _cm_state_field('State', "sc-local-counsel-state", "sc-local-counsel-state-custom", "sc-local-counsel-state-custom-wrap"),
-                                _cm_field('ZIP', "sc-local-counsel-zip"),
-                            ]),
-                            _cm_field('Local Counsel Phone', "sc-local-counsel-phone"),
-                            _cm_field('Local Counsel Email', "sc-local-counsel-email", "email"),
+                ]),
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Subcase Details", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        _cm_field('Transferee Name', "sc-transferee-name"),
+                        _cm_field('Case Caption', "sc-case-caption"),
+                        _cm_field('File Number (blank = auto-assign)', "sc-file-number"),
+                        _cm_field('Adversary Number (blank = none)', "sc-adversary-number"),
+                        _cm_field('Filing Date (YYYY-MM-DD)', "sc-filing-date", "date"),
+                    ]),
+                ]),
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Contact", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        _cm_field('Contact Name', "sc-contact-name"),
+                        _cm_field('Contact Address', "sc-contact-address"),
+                        _cm_field('Contact Address 2', "sc-contact-address2"),
+                        html.Div(className="d-flex flex-wrap gap-2", children=[
+                            _cm_field('City', "sc-contact-city"),
+                            _cm_state_field('State', "sc-contact-state", "sc-contact-state-custom", "sc-contact-state-custom-wrap"),
+                            _cm_field('ZIP', "sc-contact-zip"),
+                        ]),
+                        html.Div(className="d-flex flex-wrap gap-2", children=[
+                            html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Contact Phone', "sc-contact-phone")]),
+                            html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Contact Email', "sc-contact-email", "email")]),
                         ]),
                     ]),
                 ]),
-                html.Div(className="d-flex gap-2 mt-3", children=[
+                dbc.Card(className="mb-3 sc-form-card", children=[
+                    dbc.CardHeader("Counsel", class_name="text-bg-info fs-5 fw-bold"),
+                    dbc.CardBody(children=[
+                        dbc.Row([
+                            dbc.Col(width=6, children=[
+                                html.H4('Attorney'),
+                                html.Div(className="ps-4", children=[
+                                    _cm_field('Attorney Name', "sc-attorney-name"),
+                                    _cm_field('Attorney Firm', "sc-attorney-firm"),
+                                    _cm_field('Attorney Address', "sc-attorney-address"),
+                                    _cm_field('Attorney Address 2', "sc-attorney-address2"),
+                                    html.Div(className="d-flex flex-wrap gap-2", children=[
+                                        _cm_field('City', "sc-attorney-city"),
+                                        _cm_state_field('State', "sc-attorney-state", "sc-attorney-state-custom", "sc-attorney-state-custom-wrap"),
+                                        _cm_field('ZIP', "sc-attorney-zip"),
+                                    ]),
+                                    html.Div(className="d-flex flex-wrap gap-2", children=[
+                                        html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Attorney Phone', "sc-attorney-phone")]),
+                                        html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Attorney Email', "sc-attorney-email", "email")]),
+                                    ]),
+                                ]),
+                            ]),
+                            dbc.Col(width=6, children=[
+                                html.H4('Local Counsel'),
+                                html.Div(className="ps-4", children=[
+                                    _cm_field('Local Counsel Name', "sc-local-counsel-name"),
+                                    _cm_field('Local Counsel Firm', "sc-local-counsel-firm"),
+                                    _cm_field('Local Counsel Address', "sc-local-counsel-address"),
+                                    _cm_field('Local Counsel Address 2', "sc-local-counsel-address2"),
+                                    html.Div(className="d-flex flex-wrap gap-2", children=[
+                                        _cm_field('City', "sc-local-counsel-city"),
+                                        _cm_state_field('State', "sc-local-counsel-state", "sc-local-counsel-state-custom", "sc-local-counsel-state-custom-wrap"),
+                                        _cm_field('ZIP', "sc-local-counsel-zip"),
+                                    ]),
+                                    html.Div(className="d-flex flex-wrap gap-2", children=[
+                                        html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Local Counsel Phone', "sc-local-counsel-phone")]),
+                                        html.Div(style={"flex": "1 1 0"}, children=[_cm_field('Local Counsel Email', "sc-local-counsel-email", "email")]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+                html.Div(id="sc-subcase-status", className="mt-3"),
+                html.Div(className="sc-sticky-bar", children=[
                     dbc.Button("Save Subcase", id="sc-save-subcase", n_clicks=0, color="primary"),
                     dbc.Button("Delete Subcase", id="sc-delete-subcase", n_clicks=0, color="danger",
                                style={"display": "none", "marginLeft": "auto"}),
                 ]),
-                html.Div(id="sc-subcase-status", className="mt-3"),
                 dbc.Modal(
                     id="sc-delete-modal",
                     is_open=False,
@@ -1938,17 +1983,30 @@ def manage_ocb_range(n_total, n_plus15, click, start, end, step, n_clicks, resto
         return {"start": idx, "end": None}, start, end, step, False
     return {"start": sel["start"], "end": idx}, start, end, step, False
 
+def _main_info_lines(info, subcase_id):
+    """Shared analysis header lines (transferee, caption, main case).
+
+    Single source for every main-info producer so the Case Caption line
+    cannot drift out of one path again.  A missing subcase degrades to an
+    empty caption instead of crashing the callback.
+    """
+    try:
+        caption = store.get_subcase(subcase_id).get("case_caption") or ""
+    except ValueError:
+        caption = ""
+    return [
+        html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
+        html.Div(f"Case Caption: {caption}", style={"fontWeight": "bold", "fontSize": "1.1rem"}),
+        html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
+    ]
+
+
 def _load_subcase_payload(st, subcase_id):
     scope = auth.firm_scope(auth.current_user)
     info = load_case(st, subcase_id, firm_id=scope)
     store.save_app_state(subcase_id, firm_id=scope or 1)
     st = session.get_state()
-    caption = store.get_subcase(subcase_id).get("case_caption") or ""
-    main_info = [
-        html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
-        html.Div(f"Case Caption: {caption}", style={"fontWeight": "bold", "fontSize": "1.1rem"}),
-        html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
-    ]
+    main_info = _main_info_lines(info, subcase_id)
     return (
         main_info,
         st.df_historical.to_dict('records'),
@@ -4946,10 +5004,7 @@ def session_boot(_):
     if info is None:
         return (dash.no_update,) * 16
     scope = auth.firm_scope(auth.current_user)
-    main_info = [
-        html.Div(f"Transferee: {info['transferee']}   |   {info['subcase_id_label']}: {info['subcase_display']}", style={"fontWeight": "bold", "fontSize": "1.25rem"}),
-        html.Div(f"Main Case: {info['main_name']}   |   Preference Period: {info['pref_start']} - {info['petition_date']}"),
-    ]
+    main_info = _main_info_lines(info, info['subcase_id'])
     return (
         main_info,
         info['main_id'],

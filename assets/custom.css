@@ -144,6 +144,25 @@
     box-shadow: 0 -3px 0 0 var(--bs-primary);
 }
 
+/* Edit Subcases: card rhythm + sticky action bar (scoped to this page) */
+.sc-form-card {
+    margin-bottom: 1.25rem;
+}
+
+/* Shared sticky save bar (Edit Subcases uses the legacy sc- alias). */
+.sticky-action-bar,
+.sc-sticky-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background-color: var(--bs-body-bg);
+    border-top: 1px solid var(--bs-border-color);
+    border-radius: 0 0 0.375rem 0.375rem;
+}
+
 /* Avatar color picker swatches */
 .avatar-swatch {
     width: 34px;

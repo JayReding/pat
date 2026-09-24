@@ -397,14 +397,34 @@ def update_subcase_metadata(subcase_id, file_number=None, filing_date=None, tran
         if dup:
             raise ValueError(f"A subcase with file number '{file_number}' already exists.")
         if adversary:
-            dup_adv = conn.execute(
-                "SELECT id FROM subcases WHERE main_case_id = "
-                "(SELECT main_case_id FROM subcases WHERE id = ?) "
-                "AND adversary_number = ? AND id != ?",
-                (int(subcase_id), adversary, int(subcase_id)),
+            jurisdiction = conn.execute(
+                "SELECT m.jurisdiction FROM subcases s "
+                "JOIN main_cases m ON m.id = s.main_case_id "
+                "WHERE s.id = ?",
+                (int(subcase_id),),
             ).fetchone()
-            if dup_adv:
-                raise ValueError(f"A subcase with adversary number '{adversary}' already exists.")
+            jurisdiction = (jurisdiction[0] if jurisdiction else None) or ''
+            if jurisdiction:
+                dup_adv = conn.execute(
+                    "SELECT s.id FROM subcases s "
+                    "JOIN main_cases m ON m.id = s.main_case_id "
+                    "WHERE m.jurisdiction = ? "
+                    "AND s.adversary_number = ? AND s.id != ?",
+                    (jurisdiction, adversary, int(subcase_id)),
+                ).fetchone()
+                if dup_adv:
+                    raise ValueError(
+                        f"A subcase with adversary number '{adversary}' already exists "
+                        f"in '{jurisdiction}'.")
+            else:
+                dup_adv = conn.execute(
+                    "SELECT id FROM subcases WHERE main_case_id = "
+                    "(SELECT main_case_id FROM subcases WHERE id = ?) "
+                    "AND adversary_number = ? AND id != ?",
+                    (int(subcase_id), adversary, int(subcase_id)),
+                ).fetchone()
+                if dup_adv:
+                    raise ValueError(f"A subcase with adversary number '{adversary}' already exists.")
         current = conn.execute(
             "SELECT s.transferee_name, s.case_caption, m.client_name "
             "FROM subcases s JOIN main_cases m ON m.id = s.main_case_id "
@@ -1516,6 +1536,31 @@ def restore_main_case(payload, mode, firm_id=None, target_main_id=None):
             finally:
                 sc0.close()
 
+        if mode == "overwrite":
+            tj = cc.execute("SELECT jurisdiction FROM main_cases WHERE id = ?",
+                            (main_id,)).fetchone()
+            scope_jurisdiction = ((tj[0] if tj else None) or "").strip()
+        else:
+            scope_jurisdiction = (mains[0].get("jurisdiction") or "").strip()
+        if scope_jurisdiction:
+            seen_adv = set()
+            for row in subs:
+                adv = (row.get("adversary_number") or "").strip()
+                if not adv:
+                    continue
+                if adv in seen_adv:
+                    raise ValueError(
+                        f"Backup contains duplicate adversary number '{adv}'.")
+                seen_adv.add(adv)
+                dup = cc.execute(
+                    "SELECT s.id FROM subcases s "
+                    "JOIN main_cases m ON m.id = s.main_case_id "
+                    "WHERE m.jurisdiction = ? AND s.adversary_number = ?",
+                    (scope_jurisdiction, adv)).fetchone()
+                if dup:
+                    raise ValueError(
+                        f"A subcase with adversary number '{adv}' already exists "
+                        f"in '{scope_jurisdiction}'.")
         subs = _sanitize_file_numbers(cc, subs)
         sub_id_map = {}
         try:
@@ -1528,7 +1573,7 @@ def restore_main_case(payload, mode, firm_id=None, target_main_id=None):
             cc.rollback()
             raise ValueError(
                 "A subcase with the same adversary number already exists "
-                "in the target main case.")
+                "in this jurisdiction.")
         mapped_invs = _remap_child_rows(invs, sub_id_map)
         if mapped_invs:
             _insert_dict_rows(cc, "invoice_records", mapped_invs,
@@ -1623,6 +1668,32 @@ def restore_subcase(payload, mode, firm_id=None, target_main_id=None,
                 sc0.commit()
             finally:
                 sc0.close()
+            incoming_adv = (sub.get("adversary_number") or "").strip()
+            if incoming_adv:
+                jurisdiction = cc.execute(
+                    "SELECT jurisdiction FROM main_cases WHERE id = ?",
+                    (main_id,)).fetchone()
+                jurisdiction = (jurisdiction[0] if jurisdiction else None) or ''
+                if jurisdiction:
+                    dup_adv = cc.execute(
+                        "SELECT s.id FROM subcases s "
+                        "JOIN main_cases m ON m.id = s.main_case_id "
+                        "WHERE m.jurisdiction = ? "
+                        "AND s.adversary_number = ? AND s.id != ?",
+                        (jurisdiction, incoming_adv, new_sub_id),
+                    ).fetchone()
+                else:
+                    dup_adv = cc.execute(
+                        "SELECT id FROM subcases WHERE main_case_id = ? "
+                        "AND adversary_number = ? AND id != ?",
+                        (main_id, incoming_adv, new_sub_id),
+                    ).fetchone()
+                if dup_adv:
+                    cc.rollback()
+                    scope = f"in '{jurisdiction}'" if jurisdiction else "in the target main case"
+                    raise ValueError(
+                        f"A subcase with adversary number '{incoming_adv}' already exists "
+                        f"{scope}.")
             incoming_fn = (sub.get("file_number") or "").strip()
             taken = _existing_file_numbers(cc, exclude_subcase_id=new_sub_id)
             file_number = incoming_fn if incoming_fn and incoming_fn not in taken else None
@@ -1644,7 +1715,7 @@ def restore_subcase(payload, mode, firm_id=None, target_main_id=None,
                 cc.rollback()
                 raise ValueError(
                     "A subcase with the same adversary number already exists "
-                    "in the target main case.")
+                    "in this jurisdiction.")
         sub_id_map = {int(sub["id"]): new_sub_id}
         mapped_invs = _remap_child_rows(invs, sub_id_map)
         if mapped_invs:
