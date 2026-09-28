@@ -255,17 +255,17 @@ app.title = "Preference Analysis Tool (PAT)"
 
 def _callout(figure_id, label, icon_class, color_var="var(--bs-primary)",
              background=None, border="none", text_color="#fff", icon_id=None):
-    return html.Div(style={
-        "flex": "0 0 260px", "display": "flex", "alignItems": "center",
-        "justifyContent": "space-between", "gap": "20px", "padding": "20px 24px",
-        "borderRadius": "12px", "backgroundColor": background or color_var,
+    # Sizing lives in .case-callout* CSS classes (responsive); only the
+    # per-callout colors stay inline.
+    return html.Div(className="case-callout", style={
+        "backgroundColor": background or color_var,
         "border": border, "color": text_color,
     }, children=[
         html.Div([
-            html.Div(id=figure_id, style={"fontSize": "1.75rem", "fontWeight": "700"}),
+            html.Div(id=figure_id, className="case-callout-figure"),
             html.Div(label, style={"opacity": ".9"}),
         ]),
-        html.I(**(dict(id=icon_id) if icon_id else {}), className=icon_class, **{"aria-hidden": "true"}, style={"opacity": ".8", "fontSize": "3rem"}),
+        html.I(**(dict(id=icon_id) if icon_id else {}), className=f"{icon_class} case-callout-icon", **{"aria-hidden": "true"}),
     ])
 
 

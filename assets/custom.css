@@ -88,6 +88,28 @@
     text-align: center;
 }
 
+/* Case Summary capsules: base sizing (mirrors the former inline styles) */
+.case-callout {
+    flex: 0 0 260px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px 24px;
+    border-radius: 12px;
+}
+
+.case-callout-figure {
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.case-callout .case-callout-icon {
+    opacity: .8;
+    font-size: 3rem;
+}
+
+/* Tablet and smaller: slimmer capsules so more fit per row. */
 @media (max-width: 991px) {
     .analysis-shell {
         flex-direction: column;
@@ -99,6 +121,38 @@
         min-height: 0;
         position: static;
         padding: 1.25rem;
+    }
+
+    .case-callout {
+        flex: 0 1 210px;
+        gap: 12px;
+        padding: 14px 16px;
+    }
+
+    .case-callout-figure {
+        font-size: 1.4rem;
+    }
+
+    .case-callout .case-callout-icon {
+        font-size: 2.25rem;
+    }
+}
+
+/* Phones: compact capsules that share rows. */
+@media (max-width: 576px) {
+    .case-callout {
+        flex: 1 1 160px;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 8px;
+    }
+
+    .case-callout-figure {
+        font-size: 1.15rem;
+    }
+
+    .case-callout .case-callout-icon {
+        font-size: 1.75rem;
     }
 }
 
